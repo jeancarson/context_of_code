@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>System Metrics - {{ metrics.device_info.hostname }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .metric-card { transition: transform 0.2s; }
+        .metric-card:hover { transform: scale(1.02); }
+        .temperature-normal { color: #28a745; }
+        .temperature-warning { color: #ffc107; }
+        .temperature-danger { color: #dc3545; }
+        .usage-bar {
+            height: 10px;
+            border-radius: 5px;
+            background-color: #e9ecef;
+            overflow: hidden;
+        }
+        .usage-fill {
+            height: 100%;
+            background-color: #0d6efd;
+            transition: width 0.5s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container py-5">
+        <h1 class="mb-4 text-center">System Metrics</h1>
+        <div class="text-center mb-3">
+            <h5>{{ metrics.device_info.hostname }}</h5>
+            <small class="text-muted">{{ metrics.device_info.os_type }} ({{ metrics.device_info.os_version }})</small>
+        </div>
+        <p class="text-muted text-center mb-5">Last updated: <span id="timestamp">{{ metrics.metrics[0].timestamp if metrics.metrics else 'N/A' }}</span></p>
+        
+        <div class="row">
+            <!-- CPU Card -->
+            <div class="col-md-6 mb-4">
+                <div class="card metric-card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title">CPU</h5>
+                        <div class="mb-3">
+                            <label class="form-label">Usage</label>
+                            {% set cpu_usage = metrics.get_metric_value('cpu_usage') %}
+                            <div class="usage-bar">
+                                <div class="usage-fill" style="width: {{ cpu_usage if cpu_usage is not none else 0 }}%"></div>
+                            </div>
+                            <small class="text-muted">{{ metrics.get_formatted_value('cpu_usage') }}</small>
+                        </div>
+                        {% set cpu_temp = metrics.get_metric_value('cpu_temperature') %}
+                        {% if cpu_temp is not none %}
+                        <div>
+                            <label class="form-label">Temperature</label>
+                            <h3 class="{{ 'temperature-normal' if cpu_temp < 60 else 'temperature-warning' if cpu_temp < 80 else 'temperature-danger' }}">
+                                {{ metrics.get_formatted_value('cpu_temperature') }}
+                            </h3>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Memory Card -->
+            <div class="col-md-6 mb-4">
+                <div class="card metric-card h-100 shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title">Memory</h5>
+                        <div class="mb-3">
+                            <label class="form-label">Usage</label>
+                            {% set memory_usage = metrics.get_metric_value('memory_usage') %}
+                            <div class="usage-bar">
+                                <div class="usage-fill" style="width: {{ memory_usage if memory_usage is not none else 0 }}%"></div>
+                            </div>
+                            <small class="text-muted">{{ metrics.get_formatted_value('memory_usage') }}</small>
+                        </div>
+                        <div>
+                            <label class="form-label">Available Memory</label>
+                            <h3>{{ metrics.get_formatted_value('memory_available') }}</h3>
+                            <small class="text-muted">of {{ metrics.get_formatted_value('memory_total') }} total</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center mt-4">
+            <button class="btn btn-primary" onclick="location.reload()">
+                Refresh Metrics
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Auto-refresh every 30 seconds
+        setTimeout(() => {
+            location.reload();
+        }, 30000);
+    </script>
+</body>
+</html> 

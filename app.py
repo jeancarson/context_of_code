@@ -1,9 +1,10 @@
 import datetime
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory, render_template, request
 from lib_config.config import Config
 from system_monitor import SystemMonitor
 import sys
 import logging
+from models.device_metrics import DeviceMetrics
 
 # Load configuration
 config = Config('config.json')
@@ -31,28 +32,26 @@ logger.critical("This is a sample critical message")
 @app.route("/")
 def hello():
     logger.info("Hello World!")
-    return "Hello World!"
+    return open('my.html').read()
 
 @app.route("/local_stats")
 def local_stats():
     logger.info("Fetching local stats")
     metrics = system_monitor.get_metrics()
     
-    stats = {
-        "cpu": {
-            "usage_percent": metrics.cpu_percent,
-            "temperature_c": metrics.cpu_temp
-        },
-        "memory": {
-            "usage_percent": metrics.memory_percent,
-            "available_gb": metrics.memory_available_gb,
-            "total_gb": metrics.memory_total_gb
-        },
-        "datetime": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
-    stats_json = jsonify(stats) 
-    logger.debug("Local temperature: %s", stats["cpu"]["temperature_c"])  # Changed from stats.cpu.temperature_c
-    return stats_json
+    device_metrics = DeviceMetrics.create_from_metrics(metrics)
+    
+    # For API calls that expect JSON
+    if request.headers.get('Accept') == 'application/json':
+        return device_metrics.to_json(indent=2)
+    
+    # For browser views, render the HTML template
+    return render_template('metrics.html', metrics=device_metrics)
+
+# Add this route to serve static files
+@app.route('/static/<path:path>')
+def send_static(path):
+    return send_from_directory('static', path)
 
 if __name__ == "__main__":
     app.run(
