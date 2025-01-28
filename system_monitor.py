@@ -1,8 +1,8 @@
 import psutil
-import wmi
 import logging
 from pydantic import BaseModel
 from typing import Optional
+import platform
 
 logger = logging.getLogger(__name__)
 
@@ -15,28 +15,36 @@ class SystemMetrics(BaseModel):
 
 class SystemMonitor:
     def __init__(self):
-        self.wmi_client = wmi.WMI()
         self.temp_monitoring_available = False
+        self.is_windows = platform.system() == "Windows"
         
-        # Check if temperature monitoring is available
-        try:
-            temp = self.get_cpu_temperature()
-            self.temp_monitoring_available = temp is not None
-            if not self.temp_monitoring_available:
-                logger.warning("CPU temperature monitoring is not available on this system")
-            else:
-                logger.info("CPU temperature monitoring initialized successfully")
-        except Exception as e:
-            logger.warning(f"Failed to initialize temperature monitoring: {e}")
+        # Initialize temperature monitoring if Windows
+        if self.is_windows:
+            try:
+                import wmi
+                self.wmi_client = wmi.WMI()
+                temp = self.get_cpu_temperature()
+                self.temp_monitoring_available = temp is not None
+                if not self.temp_monitoring_available:
+                    logger.warning("CPU temperature monitoring is not available on this system")
+                else:
+                    logger.info("CPU temperature monitoring initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize temperature monitoring: {e}")
+        else:
+            logger.info("Skipping WMI initialization for non-Windows platforms")
         
         logger.info("System monitor initialized")
 
     def get_cpu_temperature(self) -> Optional[float]:
+        if not self.is_windows:
+            logger.warning("CPU temperature monitoring is not supported on this platform")
+            return None
+        
         try:
             # First attempt: MSAcpi_ThermalZoneTemperature
             temperatures = self.wmi_client.MSAcpi_ThermalZoneTemperature()
             if temperatures:
-                # Convert tenths of Kelvin to Celsius
                 temp_kelvin = float(temperatures[0].CurrentTemperature) / 10
                 return temp_kelvin - 273.15
 
@@ -46,13 +54,6 @@ class SystemMonitor:
                 for probe in temperature_probes:
                     if probe.CurrentReading:
                         return float(probe.CurrentReading)
-
-            # Third attempt: Win32_PerfFormattedData_Counters_ThermalZoneInformation
-            thermal_zones = self.wmi_client.Win32_PerfFormattedData_Counters_ThermalZoneInformation()
-            if thermal_zones:
-                for zone in thermal_zones:
-                    if hasattr(zone, 'Temperature'):
-                        return float(zone.Temperature)
 
             logger.warning("No temperature data available through WMI")
             return None
@@ -71,7 +72,7 @@ class SystemMonitor:
         memory_available_gb = memory.available / (1024 ** 3)  # Convert to GB
         
         # Get CPU temperature
-        cpu_temp = self.get_cpu_temperature()
+        cpu_temp = self.get_cpu_temperature() if self.is_windows else None
 
         metrics = SystemMetrics(
             cpu_percent=cpu_percent,
@@ -81,5 +82,5 @@ class SystemMonitor:
             memory_total_gb=round(memory_total_gb, 2)
         )
 
-        logger.debug(f"Collected metrics: CPU: {cpu_percent}%, Memory: {memory.percent}%")
-        return metrics 
+        logger.debug(f"Collected metrics: {metrics}")
+        return metrics
