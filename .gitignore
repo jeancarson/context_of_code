@@ -1,5 +1,4 @@
 # Add this if you haven't already
-config.json
 .venv/
 __pycache__/
 *.pyc
