@@ -53,9 +53,9 @@ def local_stats():
 def send_static(path):
     return send_from_directory('static', path)
 
-if __name__ == "__main__":
-    app.run(
-        host=config.flask.host,
-        port=config.flask.port
-    ) 
-    sys.exit(0)
+# if __name__ == "__main__":
+#     app.run(
+#         host=config.flask.host,
+#         port=config.flask.port
+#     ) 
+#     sys.exit(0)
