@@ -1,3 +1,4 @@
+import os
 import datetime
 from flask import Flask, jsonify, send_from_directory, render_template, request
 from lib_config.config import Config
@@ -6,8 +7,11 @@ import sys
 import logging
 from models.device_metrics import DeviceMetrics
 
+# Compute root directory once and use it throughout the file
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Load configuration
-config = Config('config.json')
+config = Config(os.path.join(ROOT_DIR, 'config.json'))
 
 # Initialize Flask app with configuration
 app = Flask(__name__)
@@ -32,7 +36,8 @@ logger.critical("This is a sample critical message")
 @app.route("/")
 def hello():
     logger.info("Hello World!")
-    return open('my.html').read()
+    my_html_path = os.path.join(ROOT_DIR, 'my.html')
+    return open(my_html_path).read()
 
 @app.route("/local_stats")
 def local_stats():
@@ -51,7 +56,7 @@ def local_stats():
 # Add this route to serve static files
 @app.route('/static/<path:path>')
 def send_static(path):
-    return send_from_directory('static', path)
+    return send_from_directory(os.path.join(ROOT_DIR, 'static'), path)
 
 # if __name__ == "__main__":
 #     app.run(
