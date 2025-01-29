@@ -58,9 +58,11 @@ def local_stats():
 def send_static(path):
     return send_from_directory(os.path.join(ROOT_DIR, 'static'), path)
 
-# if __name__ == "__main__":
-#     app.run(
-#         host=config.flask.host,
-#         port=config.flask.port
-#     ) 
-#     sys.exit(0)
+if __name__ == "__main__":
+    # Only run the Flask development server if we're not on PythonAnywhere
+    if not os.getenv('PYTHONANYWHERE_SITE'):
+        app.run(
+            host=config.flask.host,
+            port=config.flask.port
+        )
+        sys.exit(0)
