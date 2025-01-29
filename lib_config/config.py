@@ -83,17 +83,10 @@ class Config:
         return script_dir
 
     def _load_config(self, config_path: str) -> dict:
-        if not os.path.isabs(config_path):
-            # Get absolute path based on the project root
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Go up one level from lib_config
-            config_path = os.path.join(project_root, config_path)
-
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Config file not found: {config_path}")
-
         with open(config_path, 'r') as f:
             return json.load(f)
-
 
     def __getattr__(self, name: str):
         # Delegate attribute access to the Pydantic model
