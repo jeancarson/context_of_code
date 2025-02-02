@@ -3,3 +3,7 @@ how to start with flask run --debug and why it brokern
 do i need to have production and dev debug levels in config.json
 if so, wheres that set??
 
+should requirments.txt be installed automatically or after setting up venv?
+
+
+should logger be called as self.logger?
