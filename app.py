@@ -13,6 +13,7 @@ import threading
 import time
 import psutil
 from block_timer import BlockTimer
+from metrics_cache import MetricsCache
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,8 +32,18 @@ config.setup_logging()
 # Initialize system monitor
 system_monitor = SystemMonitor()
 
-# Access configuration values naturally with typeahead and strongly typed.
-logger.info("Configured server is: %s", config.database.host)  # "localhost"
+# Define function to fetch fresh metrics
+def fetch_device_metrics():
+    metrics = system_monitor.get_metrics()
+    return DeviceMetrics.create_from_metrics(metrics)
+
+# Initialize metrics cache with our specific metrics fetcher
+metrics_cache = MetricsCache(
+    fetch_func=fetch_device_metrics,
+    cache_duration_seconds=30
+)
+
+logger.info("Configured server is: %s", config.database.host)
 
 logger.debug("This is a sample debug message")
 logger.info("This is a sample info message")
@@ -56,36 +67,60 @@ def local_stats():
         if os.getenv('PYTHONANYWHERE_SITE'):
             try:
                 # Replace with your actual local machine's public IP or domain
-                response = requests.get('http://10.65.184.146:5001/metrics')
+                response = requests.get('localhost:5001/metrics')
                 response.raise_for_status()
                 metrics_data = response.json()
-                metrics = SystemMetrics(**metrics_data)
+                metrics = DeviceMetrics(**metrics_data)
             except Exception as e:
                 logger.error(f"Failed to fetch metrics from local server: {e}")
                 return jsonify({"error": "Failed to fetch metrics from local server"}), 500
         else:
-            # When running locally, get metrics directly
-            metrics = system_monitor.get_metrics()
-        
-        device_metrics = DeviceMetrics.create_from_metrics(metrics)
+            # When running locally, get metrics from cache
+            metrics = metrics_cache.get_metrics()
         
         # For API calls that expect JSON
         if request.headers.get('Accept') == 'application/json':
-            return device_metrics.to_json(indent=2)
+            return metrics.to_json(indent=2)
         
         # For browser views, render the HTML template
-        return render_template('metrics.html', metrics=device_metrics)
+        return render_template('metrics.html', metrics=metrics)
 
 # Add this route to serve static files
 @app.route('/static/<path:path>')
 def send_static(path):
     return send_from_directory(os.path.join(ROOT_DIR, 'static'), path)
 
+@app.route('/people', methods=['GET'])
+def people_get():
+    try:
+        return render_template('people.html')
+    except Exception as e:
+        logger.error(f"Failed to render people.html: {e}")
+        return "Failed to render people.html", 500
+
+@app.route('/people', methods=['POST'])
+def people_post():
+    try:
+        name = request.form.get('name')
+        if not name:
+            logger.error("Name is required")
+            return "Name is required", 400
+        return f"Hello {name}!", 200
+    except Exception as e:
+        logger.error(f"Failed to handle people POST request: {e}")
+        return "Failed to handle people POST request", 500
+
 if __name__ == "__main__":
     # Only run the Flask development server if we're not on PythonAnywhere
     if not os.getenv('PYTHONANYWHERE_SITE'):
-        app.run(
-            host=config.flask.host,
-            port=config.flask.port
-        )
-        sys.exit(0)
+        try:
+            logger.info("Starting Flask web server on %s:%s", config.flask.host, config.flask.port)
+            app.run(
+                host=config.flask.host,
+                port=config.flask.port
+            )
+        except Exception as e:
+            logger.error(f"Failed to run Flask server: {e}")
+            sys.exit(-1)
+    else:
+        logger.info("Running on PythonAnywhere, not starting Flask server")
