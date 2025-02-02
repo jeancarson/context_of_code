@@ -1,19 +1,27 @@
 import time
 import threading
-from models.device_metrics import DeviceMetrics
-from system_monitor import SystemMonitor
+from typing import TypeVar, Generic, Callable
 
-class MetricsCache:
-    def __init__(self, cache_duration_seconds=30):
+T = TypeVar('T')
+
+class MetricsCache(Generic[T]):
+    def __init__(self, fetch_func: Callable[[], T], cache_duration_seconds=30):
+        """Generic cache for any type of metrics.
+        
+        Args:
+            fetch_func: Function that returns fresh metrics when called
+            cache_duration_seconds: How long to cache the metrics for
+        """
+        self.fetch_func = fetch_func
         self.cache_duration = cache_duration_seconds
         self.cache_lock = threading.Lock()
         self.cached_metrics = None
         self.last_update = 0
-        self.system_monitor = SystemMonitor()
         
-    def get_metrics(self):
+    def get_metrics(self) -> T:
+        """Get metrics, either from cache or by fetching fresh ones."""
         #lock means only one thread can update the cache at a time
-        #nobody can se epartially updated cache
+        #nobody can see partially updated cache
         with self.cache_lock:
             current_time = time.time()
             
@@ -21,9 +29,8 @@ class MetricsCache:
             if (self.cached_metrics is None or 
                 current_time - self.last_update > self.cache_duration):
                 
-                # Get fresh metrics
-                metrics = self.system_monitor.get_metrics()
-                self.cached_metrics = DeviceMetrics.create_from_metrics(metrics)
+                # Get fresh metrics using the provided function
+                self.cached_metrics = self.fetch_func()
                 self.last_update = current_time
             
             return self.cached_metrics

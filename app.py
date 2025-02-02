@@ -32,8 +32,16 @@ config.setup_logging()
 # Initialize system monitor
 system_monitor = SystemMonitor()
 
-# Initialize metrics cache
-metrics_cache = MetricsCache()
+# Define function to fetch fresh metrics
+def fetch_device_metrics():
+    metrics = system_monitor.get_metrics()
+    return DeviceMetrics.create_from_metrics(metrics)
+
+# Initialize metrics cache with our specific metrics fetcher
+metrics_cache = MetricsCache[DeviceMetrics](
+    fetch_func=fetch_device_metrics,
+    cache_duration_seconds=30
+)
 
 logger.info("Configured server is: %s", config.database.host)  # "localhost"
 
