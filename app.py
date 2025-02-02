@@ -13,6 +13,7 @@ import threading
 import time
 import psutil
 from block_timer import BlockTimer
+from metrics_cache import MetricsCache
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +32,9 @@ config.setup_logging()
 # Initialize system monitor
 system_monitor = SystemMonitor()
 
-# Access configuration values naturally with typeahead and strongly typed.
+# Initialize metrics cache
+metrics_cache = MetricsCache()
+
 logger.info("Configured server is: %s", config.database.host)  # "localhost"
 
 logger.debug("This is a sample debug message")
@@ -64,10 +67,8 @@ def local_stats():
                 logger.error(f"Failed to fetch metrics from local server: {e}")
                 return jsonify({"error": "Failed to fetch metrics from local server"}), 500
         else:
-            # When running locally, get metrics directly
-            metrics = system_monitor.get_metrics()
-        
-        device_metrics = DeviceMetrics.create_from_metrics(metrics)
+            # When running locally, get metrics from cache
+            device_metrics = metrics_cache.get_metrics()
         
         # For API calls that expect JSON
         if request.headers.get('Accept') == 'application/json':
@@ -84,8 +85,11 @@ def send_static(path):
 if __name__ == "__main__":
     # Only run the Flask development server if we're not on PythonAnywhere
     if not os.getenv('PYTHONANYWHERE_SITE'):
-        app.run(
-            host=config.flask.host,
-            port=config.flask.port
-        )
-        sys.exit(0)
+        try:
+            app.run(
+                host=config.flask.host,
+                port=config.flask.port
+            )
+        except Exception as e:
+            logger.error(f"Failed to run Flask server: {e}")
+            sys.exit(-1)
