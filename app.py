@@ -99,10 +99,9 @@ def local_stats():
                 }
                 device_metrics = DeviceMetrics(**metrics)
             else:
-                # When on PythonAnywhere, fetch from local publisher
-                logger.info("Running on PythonAnywhere, fetching from local metrics publisher")
-                # Replace with your actual local machine's public IP or domain
-                response = requests.get('http://80.233.42.56:5001/metrics')
+                # When on PythonAnywhere, fetch from ngrok tunnel
+                logger.info("Running on PythonAnywhere, fetching from ngrok tunnel")
+                response = requests.get('https://1eff-80-233-75-158.ngrok-free.app/metrics')
                 response.raise_for_status()
                 metrics_data = response.json()
                 device_metrics = DeviceMetrics(**metrics_data)
