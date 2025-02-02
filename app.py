@@ -34,8 +34,28 @@ system_monitor = SystemMonitor()
 
 # Define function to fetch fresh metrics
 def fetch_device_metrics():
-    metrics = system_monitor.get_metrics()
-    return DeviceMetrics.create_from_metrics(metrics)
+    if not os.getenv('PYTHONANYWHERE_SITE'):
+        # When running locally, get metrics directly
+        battery = psutil.sensors_battery()
+        battery_percent = battery.percent if battery else 0.0
+        memory = psutil.virtual_memory()
+        
+        metrics = {
+            'battery_percent': battery_percent,
+            'cpu_percent': psutil.cpu_percent(),
+            'memory_percent': memory.percent,
+            'memory_used_mb': memory.used / (1024 * 1024),
+            'memory_total_mb': memory.total / (1024 * 1024),
+            'timestamp': datetime.datetime.now().isoformat()
+        }
+        return DeviceMetrics(**metrics)
+    else:
+        # When on PythonAnywhere, fetch from ngrok tunnel
+        logger.info("Running on PythonAnywhere, fetching from ngrok tunnel")
+        response = requests.get('https://1eff-80-233-75-158.ngrok-free.app/metrics')
+        response.raise_for_status()
+        metrics_data = response.json()
+        return DeviceMetrics(**metrics_data)
 
 # Initialize metrics cache with our specific metrics fetcher
 metrics_cache = MetricsCache[DeviceMetrics](
@@ -61,29 +81,42 @@ def hello():
 @app.route("/local_stats")
 def local_stats():
     with BlockTimer("Get Local Stats Request", logger):
-        logger.info("Fetching local stats")
-        
-        # When on PythonAnywhere, fetch metrics from local server
-        if os.getenv('PYTHONANYWHERE_SITE'):
-            try:
+        try:
+            # When running locally, get metrics directly
+            if not os.getenv('PYTHONANYWHERE_SITE'):
+                logger.info("Running locally, getting direct system metrics")
+                battery = psutil.sensors_battery()
+                battery_percent = battery.percent if battery else 0.0
+                memory = psutil.virtual_memory()
+                
+                metrics = {
+                    'battery_percent': battery_percent,
+                    'cpu_percent': psutil.cpu_percent(),
+                    'memory_percent': memory.percent,
+                    'memory_used_mb': memory.used / (1024 * 1024),
+                    'memory_total_mb': memory.total / (1024 * 1024),
+                    'timestamp': datetime.datetime.now().isoformat()
+                }
+                device_metrics = DeviceMetrics(**metrics)
+            else:
+                # When on PythonAnywhere, fetch from local publisher
+                logger.info("Running on PythonAnywhere, fetching from local metrics publisher")
                 # Replace with your actual local machine's public IP or domain
-                response = requests.get('http://10.65.184.146:5001/metrics')
+                response = requests.get('http://80.233.42.56:5001/metrics')
                 response.raise_for_status()
                 metrics_data = response.json()
-                metrics = SystemMetrics(**metrics_data)
-            except Exception as e:
-                logger.error(f"Failed to fetch metrics from local server: {e}")
-                return jsonify({"error": "Failed to fetch metrics from local server"}), 500
-        else:
-            # When running locally, get metrics from cache
-            device_metrics = metrics_cache.get_metrics()
-        
-        # For API calls that expect JSON
-        if request.headers.get('Accept') == 'application/json':
-            return device_metrics.to_json(indent=2)
-        
-        # For browser views, render the HTML template
-        return render_template('metrics.html', metrics=device_metrics)
+                device_metrics = DeviceMetrics(**metrics_data)
+            
+            # For API calls that expect JSON
+            if request.headers.get('Accept') == 'application/json':
+                return device_metrics.to_json(indent=2)
+            
+            # For browser views, render the HTML template
+            return render_template('metrics.html', metrics=device_metrics)
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch metrics: {str(e)}", exc_info=True)
+            return jsonify({"error": f"Failed to fetch metrics: {str(e)}"}), 500
 
 # Add this route to serve static files
 @app.route('/static/<path:path>')
