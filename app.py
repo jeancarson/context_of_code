@@ -15,92 +15,92 @@ import psutil
 from block_timer import BlockTimer
 from metrics_cache import MetricsCache
 
-class App:
-    def __init__(self):
-        # Compute root directory once and use it throughout the file
-        self.root_dir = os.path.dirname(os.path.abspath(__file__))
+# Compute root directory once and use it throughout the file
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-        # Load configuration
-        self.config = Config(os.path.join(self.root_dir, 'config.json'))
+# Load configuration
+config = Config(os.path.join(ROOT_DIR, 'config.json'))
 
-        # Initialize Flask app with configuration
-        app = Flask(__name__)
-        app.config['DEBUG'] = self.config.debug
-        app.config['SECRET_KEY'] = self.config.flask.secret_key
+# Initialize Flask app with configuration
+app = Flask(__name__)
+app.config['DEBUG'] = config.debug
+app.config['SECRET_KEY'] = config.flask.secret_key
 
-        self.logger = logging.getLogger(__name__)
-        self.config.setup_logging()
+logger = logging.getLogger(__name__)
+config.setup_logging()
 
-        # Initialize system monitor
-        self.system_monitor = SystemMonitor()
+# Initialize system monitor
+system_monitor = SystemMonitor()
 
-        self.logger.info("Application initialized with configuration: %s", self.config)
+# Define function to fetch fresh metrics
+def fetch_device_metrics():
+    metrics = system_monitor.get_metrics()
+    return DeviceMetrics.create_from_metrics(metrics)
 
-        # Define function to fetch fresh metrics
-        def fetch_device_metrics(self):
-            # Get metrics directly from the system
-            battery = psutil.sensors_battery()
-            battery_percent = battery.percent if battery else 0.0
-            memory = psutil.virtual_memory()
-            
-            metrics = {
-                'battery_percent': battery_percent,
-                'cpu_percent': psutil.cpu_percent(),
-                'memory_percent': memory.percent,
-                'memory_used_mb': memory.used / (1024 * 1024),
-                'memory_total_mb': memory.total / (1024 * 1024),
-                'timestamp': datetime.datetime.now().isoformat()
-            }
-            return DeviceMetrics(**metrics)
+# Initialize metrics cache with our specific metrics fetcher
+metrics_cache = MetricsCache(
+    fetch_func=fetch_device_metrics,
+    cache_duration_seconds=30
+)
 
-        # Initialize metrics cache with our specific metrics fetcher
-        self.metrics_cache = MetricsCache[DeviceMetrics](
-            fetch_func=fetch_device_metrics,
-            cache_duration_seconds=30
-        )
+logger.info("Configured server is: %s", config.database.host)
 
-        self.logger.info("Configured server is: %s", self.config.database.host)  # "localhost"
+logger.debug("This is a sample debug message")
+logger.info("This is a sample info message")
+logger.warning("This is a sample warning message")
+logger.error("This is a sample error message")
+logger.critical("This is a sample critical message")
 
-        self.logger.debug("This is a sample debug message")
-        self.logger.info("This is a sample info message")
-        self.logger.warning("This is a sample warning message")
-        self.logger.error("This is a sample error message")
-        self.logger.critical("This is a sample critical message")
+@app.route("/")
+def hello():
+    with BlockTimer("Hello World Request", logger):
+        logger.info("Hello World!")
+        my_html_path = os.path.join(ROOT_DIR, 'my.html')
+        return open(my_html_path).read()
 
-    @app.route("/")
-    def hello(self):
-        with BlockTimer("Hello World Request", self.logger):
-            self.logger.info("Hello World!")
-            my_html_path = os.path.join(self.root_dir, 'my.html')
-            return open(my_html_path).read()
-
-    @app.route("/local_stats")
-    def local_stats(self):
-        with BlockTimer("Get Local Stats Request", self.logger):
+@app.route("/local_stats")
+def local_stats():
+    with BlockTimer("Get Local Stats Request", logger):
+        logger.info("Fetching local stats")
+        
+        # When on PythonAnywhere, fetch metrics from local server
+        if os.getenv('PYTHONANYWHERE_SITE'):
             try:
-                metrics = self.fetch_device_metrics()
-                return jsonify(metrics.dict())
+                # Replace with your actual local machine's public IP or domain
+                response = requests.get('http://10.65.184.146:5001/metrics')
+                response.raise_for_status()
+                metrics_data = response.json()
+                metrics = DeviceMetrics(**metrics_data)
             except Exception as e:
-                self.logger.error(f"Error getting system metrics: {e}")
-                return jsonify({"error": str(e)}), 500
-
-
-    def run():
-        # Only run the Flask development server if we're not on PythonAnywhere
-        if not os.getenv('PYTHONANYWHERE_SITE'):
-            try:
-                self.logger.info("Starting Flask web server on port %s", self.config.flask.port)
-                app.run(
-                    host=self.config.flask.host,
-                    port=self.config.flask.port
-                )
-            except Exception as e:
-                self.logger.exception("Application failed with error: %s", str(e))
-                sys.exit(-1)
+                logger.error(f"Failed to fetch metrics from local server: {e}")
+                return jsonify({"error": "Failed to fetch metrics from local server"}), 500
         else:
-            self.logger.info("Running on PythonAnywhere, not starting Flask server")
+            # When running locally, get metrics from cache
+            metrics = metrics_cache.get()
+        
+        # For API calls that expect JSON
+        if request.headers.get('Accept') == 'application/json':
+            return metrics.to_json(indent=2)
+        
+        # For browser views, render the HTML template
+        return render_template('metrics.html', metrics=metrics)
+
+# Add this route to serve static files
+@app.route('/static/<path:path>')
+def send_static(path):
+    return send_from_directory(os.path.join(ROOT_DIR, 'static'), path)
 
 if __name__ == "__main__":
-    app = App()
-    app.run()
-    app.logger.info("Application completed successfully")
+    # Only run the Flask development server if we're not on PythonAnywhere
+    if not os.getenv('PYTHONANYWHERE_SITE'):
+        try:
+            logger.info("Starting Flask web server on %s:%s", config.flask.host, config.flask.port)
+            app.run(
+                host=config.flask.host,
+                port=config.flask.port
+            )
+        except Exception as e:
+            logger.error(f"Failed to run Flask server: {e}")
+            sys.exit(-1)
+    else:
+        logger.info("Running on PythonAnywhere, not starting Flask server")
