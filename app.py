@@ -24,9 +24,9 @@ class App:
         self.config = Config(os.path.join(self.root_dir, 'config.json'))
 
         # Initialize Flask app with configuration
-        self.webserver = Flask(__name__)
-        self.webserver.config['DEBUG'] = self.config.debug
-        self.webserver.config['SECRET_KEY'] = self.config.flask.secret_key
+        app = Flask(__name__)
+        app.config['DEBUG'] = self.config.debug
+        app.config['SECRET_KEY'] = self.config.flask.secret_key
 
         self.logger = logging.getLogger(__name__)
         self.config.setup_logging()
@@ -90,7 +90,7 @@ class App:
         if not os.getenv('PYTHONANYWHERE_SITE'):
             try:
                 self.logger.info("Starting Flask web server on port %s", self.config.flask.port)
-                self.webserver.run(
+                app.run(
                     host=self.config.flask.host,
                     port=self.config.flask.port
                 )
