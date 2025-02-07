@@ -71,6 +71,21 @@ class Config:
             
         # Load and validate config using Pydantic
         config_data = self._load_config(config_path)
+        
+        # Detect if running on PythonAnywhere
+        is_pythonanywhere = 'PYTHONANYWHERE_SITE' in os.environ
+        
+        # Modify host settings based on environment
+        if is_pythonanywhere:
+            config_data['flask']['host'] = '0.0.0.0'
+            if 'database' in config_data:
+                config_data['database']['host'] = '0.0.0.0'
+        else:
+            # Local environment
+            config_data['flask']['host'] = 'localhost'
+            if 'database' in config_data:
+                config_data['database']['host'] = 'localhost'
+        
         self._config = ConfigModel(**config_data)
         
         # Setup logging
