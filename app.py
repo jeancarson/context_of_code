@@ -15,121 +15,96 @@ import psutil
 from block_timer import BlockTimer
 from metrics_cache import MetricsCache
 
-# Compute root directory once and use it throughout the file
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+class App:
+    def __init__(self):
+        # Compute root directory once and use it throughout the file
+        self.root_dir = os.path.dirname(os.path.abspath(__file__))
 
-# Load configuration
-config = Config(os.path.join(ROOT_DIR, 'config.json'))
+        # Load configuration
+        self.config = Config(os.path.join(self.root_dir, 'config.json'))
 
-# Initialize Flask app with configuration
-app = Flask(__name__)
-app.config['DEBUG'] = config.debug
-app.config['SECRET_KEY'] = config.flask.secret_key
+        # Initialize Flask app with configuration
+        self.webserver = Flask(__name__)
+        self.webserver.config['DEBUG'] = self.config.debug
+        self.webserver.config['SECRET_KEY'] = self.config.flask.secret_key
 
-logger = logging.getLogger(__name__)
-config.setup_logging()
+        self.logger = logging.getLogger(__name__)
+        self.config.setup_logging()
 
-# Initialize system monitor
-system_monitor = SystemMonitor()
+        # Initialize system monitor
+        self.system_monitor = SystemMonitor()
 
-# Define function to fetch fresh metrics
-def fetch_device_metrics():
-    if not os.getenv('PYTHONANYWHERE_SITE'):
-        # When running locally, get metrics directly
-        battery = psutil.sensors_battery()
-        battery_percent = battery.percent if battery else 0.0
-        memory = psutil.virtual_memory()
-        
-        metrics = {
-            'battery_percent': battery_percent,
-            'cpu_percent': psutil.cpu_percent(),
-            'memory_percent': memory.percent,
-            'memory_used_mb': memory.used / (1024 * 1024),
-            'memory_total_mb': memory.total / (1024 * 1024),
-            'timestamp': datetime.datetime.now().isoformat()
-        }
-        return DeviceMetrics(**metrics)
-    else:
-        # When on PythonAnywhere, fetch from ngrok tunnel
-        logger.info("Running on PythonAnywhere, fetching from ngrok tunnel")
-        response = requests.get('https://1eff-80-233-75-158.ngrok-free.app/metrics')
-        response.raise_for_status()
-        metrics_data = response.json()
-        return DeviceMetrics(**metrics_data)
+        self.logger.info("Application initialized with configuration: %s", self.config)
 
-# Initialize metrics cache with our specific metrics fetcher
-metrics_cache = MetricsCache[DeviceMetrics](
-    fetch_func=fetch_device_metrics,
-    cache_duration_seconds=30
-)
-
-logger.info("Configured server is: %s", config.database.host)  # "localhost"
-
-logger.debug("This is a sample debug message")
-logger.info("This is a sample info message")
-logger.warning("This is a sample warning message")
-logger.error("This is a sample error message")
-logger.critical("This is a sample critical message")
-
-@app.route("/")
-def hello():
-    with BlockTimer("Hello World Request", logger):
-        logger.info("Hello World!")
-        my_html_path = os.path.join(ROOT_DIR, 'my.html')
-        return open(my_html_path).read()
-
-@app.route("/local_stats")
-def local_stats():
-    with BlockTimer("Get Local Stats Request", logger):
-        try:
-            # When running locally, get metrics directly
-            if not os.getenv('PYTHONANYWHERE_SITE'):
-                logger.info("Running locally, getting direct system metrics")
-                battery = psutil.sensors_battery()
-                battery_percent = battery.percent if battery else 0.0
-                memory = psutil.virtual_memory()
-                
-                metrics = {
-                    'battery_percent': battery_percent,
-                    'cpu_percent': psutil.cpu_percent(),
-                    'memory_percent': memory.percent,
-                    'memory_used_mb': memory.used / (1024 * 1024),
-                    'memory_total_mb': memory.total / (1024 * 1024),
-                    'timestamp': datetime.datetime.now().isoformat()
-                }
-                device_metrics = DeviceMetrics(**metrics)
-            else:
-                # When on PythonAnywhere, fetch from ngrok tunnel
-                logger.info("Running on PythonAnywhere, fetching from ngrok tunnel")
-                response = requests.get('https://1eff-80-233-75-158.ngrok-free.app/metrics')
-                response.raise_for_status()
-                metrics_data = response.json()
-                device_metrics = DeviceMetrics(**metrics_data)
+        # Define function to fetch fresh metrics
+        def fetch_device_metrics(self):
+            # Get metrics directly from the system
+            battery = psutil.sensors_battery()
+            battery_percent = battery.percent if battery else 0.0
+            memory = psutil.virtual_memory()
             
-            # For API calls that expect JSON
-            if request.headers.get('Accept') == 'application/json':
-                return device_metrics.to_json(indent=2)
-            
-            # For browser views, render the HTML template
-            return render_template('metrics.html', metrics=device_metrics)
-            
-        except Exception as e:
-            logger.error(f"Failed to fetch metrics: {str(e)}", exc_info=True)
-            return jsonify({"error": f"Failed to fetch metrics: {str(e)}"}), 500
+            metrics = {
+                'battery_percent': battery_percent,
+                'cpu_percent': psutil.cpu_percent(),
+                'memory_percent': memory.percent,
+                'memory_used_mb': memory.used / (1024 * 1024),
+                'memory_total_mb': memory.total / (1024 * 1024),
+                'timestamp': datetime.datetime.now().isoformat()
+            }
+            return DeviceMetrics(**metrics)
 
-# Add this route to serve static files
-@app.route('/static/<path:path>')
-def send_static(path):
-    return send_from_directory(os.path.join(ROOT_DIR, 'static'), path)
+        # Initialize metrics cache with our specific metrics fetcher
+        self.metrics_cache = MetricsCache[DeviceMetrics](
+            fetch_func=fetch_device_metrics,
+            cache_duration_seconds=30
+        )
+
+        self.logger.info("Configured server is: %s", self.config.database.host)  # "localhost"
+
+        self.logger.debug("This is a sample debug message")
+        self.logger.info("This is a sample info message")
+        self.logger.warning("This is a sample warning message")
+        self.logger.error("This is a sample error message")
+        self.logger.critical("This is a sample critical message")
+
+    @self.webserver.route("/")
+    def hello(self):
+        with BlockTimer("Hello World Request", self.logger):
+            self.logger.info("Hello World!")
+            my_html_path = os.path.join(self.root_dir, 'my.html')
+            return open(my_html_path).read()
+
+    @self.webserver.route("/local_stats")
+    def local_stats(self):
+        with BlockTimer("Get Local Stats Request", self.logger):
+            try:
+                metrics = self.fetch_device_metrics()
+                return jsonify(metrics.dict())
+            except Exception as e:
+                self.logger.error(f"Error getting system metrics: {e}")
+                return jsonify({"error": str(e)}), 500
+
+    # Add this route to serve static files
+    @self.webserver.route('/static/<path:path>')
+    def send_static(self, path):
+        return send_from_directory(os.path.join(self.root_dir, 'static'), path)
+
+    def run(self):
+        # Only run the Flask development server if we're not on PythonAnywhere
+        if not os.getenv('PYTHONANYWHERE_SITE'):
+            try:
+                self.logger.info("Starting Flask web server on port %s", self.config.flask.port)
+                self.webserver.run(
+                    host=self.config.flask.host,
+                    port=self.config.flask.port
+                )
+            except Exception as e:
+                self.logger.exception("Application failed with error: %s", str(e))
+                sys.exit(-1)
+        else:
+            self.logger.info("Running on PythonAnywhere, not starting Flask server")
 
 if __name__ == "__main__":
-    # Only run the Flask development server if we're not on PythonAnywhere
-    if not os.getenv('PYTHONANYWHERE_SITE'):
-        try:
-            app.run(
-                host=config.flask.host,
-                port=config.flask.port
-            )
-        except Exception as e:
-            logger.error(f"Failed to run Flask server: {e}")
-            sys.exit(-1)
+    app = App()
+    app.run()
+    app.logger.info("Application completed successfully")
