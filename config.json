@@ -18,5 +18,22 @@
         "host": "localhost",
         "port": 5000
     },
-    "logging_config": {}
+    "logging_config": {
+        "console_output": {
+            "enabled": true,
+            "level": "INFO",
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            "date_format": "%Y-%m-%d %H:%M:%S"
+        },
+        "file_output": {
+            "enabled": true,
+            "log_dir": "/path/to/logs",
+            "level": "DEBUG",
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            "date_format": "%Y-%m-%d %H:%M:%S",
+            "filename": "app.log",
+            "max_bytes": 1000000,
+            "backup_count": 5
+        }
+    }
 }

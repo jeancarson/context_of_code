@@ -67,7 +67,7 @@ def local_stats():
         if os.getenv('PYTHONANYWHERE_SITE'):
             try:
                 # Replace with your actual local machine's public IP or domain
-                response = requests.get('http://10.65.184.146:5001/metrics')
+                response = requests.get('localhost:5001/metrics')
                 response.raise_for_status()
                 metrics_data = response.json()
                 metrics = DeviceMetrics(**metrics_data)
