@@ -27,7 +27,7 @@
         },
         "file_output": {
             "enabled": true,
-            "log_dir": "/path/to/logs",
+            "log_dir": "logs",
             "level": "DEBUG",
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             "date_format": "%Y-%m-%d %H:%M:%S",
