@@ -39,8 +39,13 @@ class FlaskConfig(BaseModel):
     host: str
     port: int
 
+class ApiConfig(BaseModel):
+    url: str
+    timeout: int
+
 class ConfigModel(BaseModel):
     database: DatabaseConfig
+    api: ApiConfig
     logging_config: LoggingConfig
     flask: FlaskConfig
     debug: bool = Field(default=False)
