@@ -67,14 +67,14 @@ class App:
         self.logger.error("This is a sample error message")
         self.logger.critical("This is a sample critical message")
 
-    @self.webserver.route("/")
+    @app.route("/")
     def hello(self):
         with BlockTimer("Hello World Request", self.logger):
             self.logger.info("Hello World!")
             my_html_path = os.path.join(self.root_dir, 'my.html')
             return open(my_html_path).read()
 
-    @self.webserver.route("/local_stats")
+    @app.route("/local_stats")
     def local_stats(self):
         with BlockTimer("Get Local Stats Request", self.logger):
             try:
@@ -84,12 +84,8 @@ class App:
                 self.logger.error(f"Error getting system metrics: {e}")
                 return jsonify({"error": str(e)}), 500
 
-    # Add this route to serve static files
-    @self.webserver.route('/static/<path:path>')
-    def send_static(self, path):
-        return send_from_directory(os.path.join(self.root_dir, 'static'), path)
 
-    def run(self):
+    def run():
         # Only run the Flask development server if we're not on PythonAnywhere
         if not os.getenv('PYTHONANYWHERE_SITE'):
             try:
