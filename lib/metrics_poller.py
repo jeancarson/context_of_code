@@ -3,8 +3,8 @@ import logging
 import requests
 from typing import Optional, Dict, Any, Callable
 from dataclasses import dataclass
-from .system_monitor import SystemMonitor
-from .config import Config
+from system_monitor import SystemMonitor
+from config import Config
 import threading
 from queue import Queue
 import json
