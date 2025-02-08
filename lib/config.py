@@ -65,10 +65,6 @@ class Config:
         config_data = self._load_config(config_path)
         
         # Detect if running on PythonAnywhere
-        if 'PYTHONANYWHERE_SITE' in os.environ:
-            config_data['server']['host'] = '0.0.0.0'
-        
-        self._config = ConfigModel(**config_data)
         
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from JSON file."""
