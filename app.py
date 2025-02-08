@@ -64,19 +64,19 @@ def local_stats():
         logger.info("Fetching local stats")
         
         # When on PythonAnywhere, fetch metrics from local server
-        if os.getenv('PYTHONANYWHERE_SITE'):
-            try:
-                # Replace with your actual local machine's public IP or domain
-                response = requests.get('localhost:5001/metrics')
-                response.raise_for_status()
-                metrics_data = response.json()
-                metrics = DeviceMetrics(**metrics_data)
-            except Exception as e:
-                logger.error(f"Failed to fetch metrics from local server: {e}")
-                return jsonify({"error": "Failed to fetch metrics from local server"}), 500
-        else:
-            # When running locally, get metrics from cache
-            metrics = metrics_cache.get_metrics()
+        # if os.getenv('PYTHONANYWHERE_SITE'):
+        #     try:
+        #         # Replace with your actual local machine's public IP or domain
+        #         response = requests.get('localhost:5001/metrics')
+        #         response.raise_for_status()
+        #         metrics_data = response.json()
+        #         metrics = DeviceMetrics(**metrics_data)
+        #     except Exception as e:
+        #         logger.error(f"Failed to fetch metrics from local server: {e}")
+        #         return jsonify({"error": "Failed to fetch metrics from local server"}), 500
+        # else:
+        #     # When running locally, get metrics from cache
+        metrics = metrics_cache.get_metrics()
         
         # For API calls that expect JSON
         if request.headers.get('Accept') == 'application/json':
