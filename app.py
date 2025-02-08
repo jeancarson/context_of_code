@@ -92,3 +92,6 @@ if __name__ == "__main__":
         )
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
+else:
+    # For WSGI servers
+    application = app
