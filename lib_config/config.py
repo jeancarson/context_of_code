@@ -119,70 +119,65 @@ class Config:
         # Delegate attribute access to the Pydantic model
         return getattr(self._config, name)
 
-    def setup_logging(self) -> logging.Logger:
-        # Create logs directory if needed and file output is enabled
-        if self._config.logging_config.file_output.enabled:
-            os.makedirs(self._config.logging_config.file_output.log_dir, exist_ok=True)
-                
-        # Get root logger
-        logger = logging.getLogger()
+    def setup_logging(self):
+        """Set up logging configuration."""
+        # Clear any existing handlers
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
 
         # Create filters
         flask_filter = FlaskFilter()
         colored_flask_filter = ColoredFlaskFilter()
 
-        # Set base filtering to be the lowest of all enabled handlers
-        root_level = logging.NOTSET
-        enabled_levels = []
-        if self._config.logging_config.console_output.enabled:
-            enabled_levels.append(self._config.logging_config.console_output.get_level())
-        if self._config.logging_config.file_output.enabled:
-            enabled_levels.append(self._config.logging_config.file_output.get_level())
-        if enabled_levels:
-            root_level = min(enabled_levels)
-        logger.setLevel(root_level)
+        # Create formatters
+        file_formatter = logging.Formatter(
+            fmt=self.logging_config.file_output.format,
+            datefmt=self.logging_config.file_output.date_format
+        )
+        
+        console_formatter = CustomColoredFormatter(
+            fmt='%(log_color)s' + self.logging_config.console_output.format,
+            datefmt=self.logging_config.console_output.date_format,
+            reset=True,
+            log_colors={
+                'DEBUG': 'cyan',
+                'INFO': 'green',
+                'WARNING': 'yellow',
+                'ERROR': 'red',
+                'CRITICAL': 'red,bg_white'
+            }
+        )
 
-        # Clear any existing handlers
-        logger.handlers.clear()
-        
-        # Add console handler if enabled
-        if self._config.logging_config.console_output.enabled:
-            console_handler = logging.StreamHandler()
-            console_formatter = CustomColoredFormatter(
-                fmt='%(log_color)s' + self._config.logging_config.console_output.format,
-                datefmt=self._config.logging_config.console_output.date_format,
-                reset=True,
-                log_colors={
-                    'DEBUG': 'cyan',
-                    'INFO': 'green',
-                    'WARNING': 'yellow',
-                    'ERROR': 'red',
-                    'CRITICAL': 'red,bg_white'
-                }
+        # Set up file logging
+        if self.logging_config.file_output.enabled:
+            # Ensure log directory exists
+            os.makedirs(self.logging_config.file_output.log_dir, exist_ok=True)
+            log_file = os.path.join(
+                self.logging_config.file_output.log_dir,
+                self.logging_config.file_output.filename
             )
-            console_handler.setFormatter(console_formatter)
-            console_handler.setLevel(self._config.logging_config.console_output.get_level())
-            console_handler.addFilter(colored_flask_filter)  # Add colored filter to console
-            logger.addHandler(console_handler)
-        
-        # Add file handler if enabled
-        if self._config.logging_config.file_output.enabled:
-            file_path = os.path.join(
-                self._config.logging_config.file_output.log_dir,
-                self._config.logging_config.file_output.filename
-            )
+            
             file_handler = logging.handlers.RotatingFileHandler(
-                file_path,
-                maxBytes=self._config.logging_config.file_output.max_bytes,
-                backupCount=self._config.logging_config.file_output.backup_count
-            )
-            file_formatter = logging.Formatter(
-                fmt=self._config.logging_config.file_output.format,
-                datefmt=self._config.logging_config.file_output.date_format
+                log_file,
+                maxBytes=self.logging_config.file_output.max_bytes,
+                backupCount=self.logging_config.file_output.backup_count
             )
             file_handler.setFormatter(file_formatter)
-            file_handler.setLevel(self._config.logging_config.file_output.get_level())
+            file_handler.setLevel(self.logging_config.file_output.get_level())
             file_handler.addFilter(flask_filter)  # Add filter to file handler
-            logger.addHandler(file_handler)
-        
-        return logger
+            root_logger.addHandler(file_handler)
+
+        # Set up console logging
+        if self.logging_config.console_output.enabled:
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(console_formatter)
+            console_handler.setLevel(self.logging_config.console_output.get_level())
+            console_handler.addFilter(colored_flask_filter)  # Add colored filter to console
+            root_logger.addHandler(console_handler)
+
+        # Set the root logger level to the lowest level of any handler
+        root_logger.setLevel(min(
+            self.logging_config.file_output.get_level() if self.logging_config.file_output.enabled else logging.CRITICAL,
+            self.logging_config.console_output.get_level() if self.logging_config.console_output.enabled else logging.CRITICAL
+        ))
