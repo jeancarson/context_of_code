@@ -63,8 +63,7 @@ class Config:
         """
         # Load and validate config using Pydantic
         config_data = self._load_config(config_path)
-        
-        # Detect if running on PythonAnywhere
+        self._config = ConfigModel(**config_data)
         
     def _load_config(self, config_path: str) -> dict:
         """Load configuration from JSON file."""
@@ -76,7 +75,10 @@ class Config:
 
     def __getattr__(self, name: str):
         """Delegate attribute access to the Pydantic model."""
-        return getattr(self._config, name)
+        try:
+            return getattr(self._config, name)
+        except AttributeError:
+            raise AttributeError(f"'Config' object has no attribute '{name}'")
 
     def setup_logging(self):
         """Set up logging configuration."""
@@ -85,58 +87,48 @@ class Config:
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
 
-        # Create filters
-        flask_filter = FlaskFilter()
-        colored_flask_filter = ColoredFlaskFilter()
-
-        # Create formatters
-        file_formatter = logging.Formatter(
-            fmt=self.logging.file.format,
-            datefmt=self.logging.file.date_format
-        )
-        
-        console_formatter = CustomColoredFormatter(
-            fmt='%(log_color)s' + self.logging.console.format,
-            datefmt=self.logging.console.date_format,
-            reset=True,
-            log_colors={
-                'DEBUG': 'cyan',
-                'INFO': 'green',
-                'WARNING': 'yellow',
-                'ERROR': 'red',
-                'CRITICAL': 'red,bg_white'
-            }
-        )
-
-        # Set up file logging
-        if self.logging.file.enabled:
-            # Ensure log directory exists
-            os.makedirs(self.logging.file.log_dir, exist_ok=True)
-            log_file = os.path.join(
-                self.logging.file.log_dir,
-                self.logging.file.filename
-            )
-            
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file,
-                maxBytes=self.logging.file.max_bytes,
-                backupCount=self.logging.file.backup_count
-            )
-            file_handler.setFormatter(file_formatter)
-            file_handler.setLevel(self.logging.file.get_level())
-            file_handler.addFilter(flask_filter)
-            root_logger.addHandler(file_handler)
-
-        # Set up console logging
-        if self.logging.console.enabled:
+        # Set up console logging if enabled
+        if self._config.logging.console.enabled:
             console_handler = logging.StreamHandler()
+            console_handler.setLevel(self._config.logging.console.get_level())
+            console_formatter = CustomColoredFormatter(
+                fmt='%(log_color)s' + self._config.logging.console.format,
+                datefmt=self._config.logging.console.date_format,
+                reset=True,
+                log_colors={
+                    'DEBUG': 'cyan',
+                    'INFO': 'green',
+                    'WARNING': 'yellow',
+                    'ERROR': 'red',
+                    'CRITICAL': 'red,bg_white',
+                }
+            )
             console_handler.setFormatter(console_formatter)
-            console_handler.setLevel(self.logging.console.get_level())
-            console_handler.addFilter(colored_flask_filter)
             root_logger.addHandler(console_handler)
 
-        # Set the root logger level to the lowest level of any handler
-        root_logger.setLevel(min(
-            self.logging.file.get_level() if self.logging.file.enabled else logging.CRITICAL,
-            self.logging.console.get_level() if self.logging.console.enabled else logging.CRITICAL
-        ))
+        # Set up file logging if enabled
+        if self._config.logging.file.enabled:
+            os.makedirs(self._config.logging.file.log_dir, exist_ok=True)
+            log_path = os.path.join(
+                self._config.logging.file.log_dir,
+                self._config.logging.file.filename
+            )
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_path,
+                maxBytes=self._config.logging.file.max_bytes,
+                backupCount=self._config.logging.file.backup_count
+            )
+            file_handler.setLevel(self._config.logging.file.get_level())
+            file_formatter = logging.Formatter(
+                fmt=self._config.logging.file.format,
+                datefmt=self._config.logging.file.date_format
+            )
+            file_handler.setFormatter(file_formatter)
+            root_logger.addHandler(file_handler)
+
+        # Set root logger level to the minimum of console and file levels
+        min_level = min(
+            self._config.logging.console.get_level() if self._config.logging.console.enabled else logging.CRITICAL,
+            self._config.logging.file.get_level() if self._config.logging.file.enabled else logging.CRITICAL
+        )
+        root_logger.setLevel(min_level)
