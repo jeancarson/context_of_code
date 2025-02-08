@@ -11,10 +11,10 @@ class BlockTimer:
         Args:
             block_name (str): Name to identify this timed block in logs
             logger (Optional[logging.Logger]): Logger instance to use for output. 
-                                             If None, uses root logger.
+                                             If None, uses module logger.
         """
         self.block_name = block_name
-        self.logger = logger or logging.getLogger()
+        self.logger = logger or logging.getLogger(__name__)
         
     def __enter__(self):
         """Start timing when entering the context."""
