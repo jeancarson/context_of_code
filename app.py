@@ -90,6 +90,7 @@ def local_stats():
 def send_static(path):
     return send_from_directory(os.path.join(ROOT_DIR, 'static'), path)
 
+
 @app.route('/people', methods=['GET'])
 def people_get():
     try:
