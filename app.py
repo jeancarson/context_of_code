@@ -62,26 +62,71 @@ def local_stats():
 def send_static(path):
     return send_from_directory(os.path.join(ROOT_DIR, 'static'), path)
 
+# Person data model
+@dataclass_json
+@dataclass
+class Person:
+    name: str
+    dob: str
+    id: int = None
+
+# In-memory database
+persons = {}
+next_id = 1
 
 @app.route('/people', methods=['GET'])
-def people_get():
-    try:
-        return render_template('people.html')
-    except Exception as e:
-        logger.error(f"Failed to render people.html: {e}")
-        return "Failed to render people.html", 500
+def get_all_persons():
+    return jsonify(list(persons.values())), 200
+
+@app.route('/people/<int:person_id>', methods=['GET'])
+def get_person(person_id):
+    person = persons.get(person_id)
+    if person is None:
+        return jsonify({"error": "Person not found"}), 404
+    return jsonify(person), 200
 
 @app.route('/people', methods=['POST'])
-def people_post():
-    try:
-        name = request.form.get('name')
-        if not name:
-            logger.error("Name is required")
-            return "Name is required", 400
-        return f"Hello {name}!", 200
-    except Exception as e:
-        logger.error(f"Failed to handle people POST request: {e}")
-        return "Failed to handle people POST request", 500
+def create_person():
+    global next_id
+    if not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 400
+    
+    data = request.get_json()
+    if not all(k in data for k in ("name", "dob")):
+        return jsonify({"error": "Missing required fields"}), 400
+    
+    person = Person(name=data['name'], dob=data['dob'], id=next_id)
+    persons[next_id] = person
+    next_id += 1
+    return jsonify(person), 201
+
+@app.route('/people/<int:person_id>', methods=['PUT'])
+def update_person(person_id):
+    if person_id not in persons:
+        return jsonify({"error": "Person not found"}), 404
+    
+    if not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 400
+    
+    data = request.get_json()
+    if not any(k in data for k in ("name", "dob")):
+        return jsonify({"error": "At least one field (name or dob) is required"}), 400
+    
+    person = persons[person_id]
+    if 'name' in data:
+        person.name = data['name']
+    if 'dob' in data:
+        person.dob = data['dob']
+    
+    return jsonify(person), 200
+
+@app.route('/people/<int:person_id>', methods=['DELETE'])
+def delete_person(person_id):
+    if person_id not in persons:
+        return jsonify({"error": "Person not found"}), 404
+    
+    del persons[person_id]
+    return '', 204
 
 if __name__ == "__main__":
     try:
