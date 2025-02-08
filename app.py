@@ -10,6 +10,7 @@ from lib.block_timer import BlockTimer
 from lib.metrics_cache import MetricsCache
 from lib.constants import HTTPMethod
 from lib.person_handler import PersonHandler
+from lib.models.remote_metrics import RemoteMetricsStore
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +42,9 @@ metrics_cache = MetricsCache(
 # Initialize the person handler
 person_handler = PersonHandler()
 
+# Initialize remote metrics store
+remote_metrics_store = RemoteMetricsStore()
+
 logger.info("Configured server is: %s:%d", config.server.host, config.server.port)
 
 logger.debug("This is a sample debug message")
@@ -58,9 +62,39 @@ def local_stats():
     with BlockTimer("Get Local Stats Request", logger):
         logger.info("Fetching local stats")
         
-        metrics = metrics_cache.get_metrics()
+        # Get both local and remote metrics
+        local_metrics = metrics_cache.get_metrics()
+        remote_machines = remote_metrics_store.get_all_metrics()
         
-        return render_template('metrics.html', metrics=metrics)
+        return render_template(
+            'metrics.html',
+            metrics=local_metrics,
+            remote_metrics=remote_machines
+        )
+
+@app.route("/metrics", methods=["POST"])
+def receive_metrics():
+    """Receive metrics from remote machines"""
+    if not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 400
+    
+    try:
+        metrics_data = request.get_json()
+        # Use the request's remote address as machine_id for now
+        machine_id = request.remote_addr
+        remote_metrics_store.update_metrics(machine_id, metrics_data)
+        
+        # You can add commands or config updates here
+        response = {
+            "status": "ok",
+            # "command": "example_command",  # Uncomment to test command execution
+            # "config": {"poll_interval_seconds": 60}  # Uncomment to test config updates
+        }
+        return jsonify(response), 200
+        
+    except Exception as e:
+        logger.error(f"Error processing metrics: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # Add this route to serve static files
 @app.route('/static/<path:path>')
