@@ -18,16 +18,15 @@ from metrics_cache import MetricsCache
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Load configuration
+# Initialize logging first
+logger = logging.getLogger(__name__)
 config = Config(os.path.join(ROOT_DIR, 'config.json'))
+config.setup_logging()
 
 # Initialize Flask app with configuration
 app = Flask(__name__)
 app.config['DEBUG'] = config.debug
 app.config['SECRET_KEY'] = config.flask.secret_key
-
-logger = logging.getLogger(__name__)
-config.setup_logging()
 
 # Initialize system monitor
 system_monitor = SystemMonitor()
