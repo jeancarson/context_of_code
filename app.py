@@ -1,19 +1,13 @@
 import os
-import datetime
 from flask import Flask, jsonify, send_from_directory, render_template, request
-from lib_config.config import Config
-from system_monitor import SystemMonitor
-import sys
+from lib.config import Config
+from lib.system_monitor import SystemMonitor
 import logging
-from models.device_metrics import DeviceMetrics
-import requests
+from lib.models.device_metrics import DeviceMetrics
 from dataclasses import dataclass
 from dataclasses_json import dataclass_json
-import threading
-import time
-import psutil
-from block_timer import BlockTimer
-from metrics_cache import MetricsCache
+from lib.block_timer import BlockTimer
+from lib.metrics_cache import MetricsCache
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,7 +20,7 @@ config.setup_logging()
 # Initialize Flask app with configuration
 app = Flask(__name__)
 app.config['DEBUG'] = config.debug
-app.config['SECRET_KEY'] = config.flask.secret_key
+app.config['SECRET_KEY'] = config.server.secret_key
 
 # Initialize system monitor
 system_monitor = SystemMonitor()
@@ -39,10 +33,10 @@ def fetch_device_metrics():
 # Initialize metrics cache with our specific metrics fetcher
 metrics_cache = MetricsCache(
     fetch_func=fetch_device_metrics,
-    cache_duration_seconds=30
+    cache_duration_seconds=config.cache.duration_seconds
 )
 
-logger.info("Configured server is: %s", config.database.host)
+logger.info("Configured server is: %s:%d", config.server.host, config.server.port)
 
 logger.debug("This is a sample debug message")
 logger.info("This is a sample info message")
@@ -52,36 +46,15 @@ logger.critical("This is a sample critical message")
 
 @app.route("/")
 def hello():
-    with BlockTimer("Hello World Request", logger):
-        logger.info("Hello World!")
-        my_html_path = os.path.join(ROOT_DIR, 'my.html')
-        return open(my_html_path).read()
+    return render_template('my.html')
 
 @app.route("/local_stats")
 def local_stats():
     with BlockTimer("Get Local Stats Request", logger):
         logger.info("Fetching local stats")
         
-        # When on PythonAnywhere, fetch metrics from local server
-        # if os.getenv('PYTHONANYWHERE_SITE'):
-        #     try:
-        #         # Replace with your actual local machine's public IP or domain
-        #         response = requests.get('localhost:5001/metrics')
-        #         response.raise_for_status()
-        #         metrics_data = response.json()
-        #         metrics = DeviceMetrics(**metrics_data)
-        #     except Exception as e:
-        #         logger.error(f"Failed to fetch metrics from local server: {e}")
-        #         return jsonify({"error": "Failed to fetch metrics from local server"}), 500
-        # else:
-        #     # When running locally, get metrics from cache
         metrics = metrics_cache.get_metrics()
         
-        # For API calls that expect JSON
-        if request.headers.get('Accept') == 'application/json':
-            return metrics.to_json(indent=2)
-        
-        # For browser views, render the HTML template
         return render_template('metrics.html', metrics=metrics)
 
 # Add this route to serve static files
@@ -111,16 +84,11 @@ def people_post():
         return "Failed to handle people POST request", 500
 
 if __name__ == "__main__":
-    # Only run the Flask development server if we're not on PythonAnywhere
-    if not os.getenv('PYTHONANYWHERE_SITE'):
-        try:
-            logger.info("Starting Flask web server on %s:%s", config.flask.host, config.flask.port)
-            app.run(
-                host=config.flask.host,
-                port=config.flask.port
-            )
-        except Exception as e:
-            logger.error(f"Failed to run Flask server: {e}")
-            sys.exit(-1)
-    else:
-        logger.info("Running on PythonAnywhere, not starting Flask server")
+    try:
+        app.run(
+            host=config.server.host,
+            port=config.server.port,
+            debug=config.debug
+        )
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")

@@ -1,39 +1,30 @@
 {
-    "database": {
+    "server": {
         "host": "localhost",
-        "port": 5432,
-        "credentials": {
-            "username": "admin",
-            "password": "secret"
-        }
+        "port": 5000,
+        "secret_key": "your-secret-key-here"
     },
-    "api": {
-        "url": "https://api.example.com",
-        "timeout": 30
+    "cache": {
+        "enabled": true,
+        "duration_seconds": 30
     },
-    "debug": true,
-    "max_retries": 3,
-    "flask": {
-        "secret_key": "your-secret-key-here",
-        "host": "localhost",
-        "port": 5000
-    },
-    "logging_config": {
-        "console_output": {
+    "logging": {
+        "console": {
             "enabled": true,
             "level": "INFO",
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             "date_format": "%Y-%m-%d %H:%M:%S"
         },
-        "file_output": {
+        "file": {
             "enabled": true,
-            "log_dir": "logs",
             "level": "DEBUG",
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             "date_format": "%Y-%m-%d %H:%M:%S",
+            "log_dir": "logs",
             "filename": "app.log",
             "max_bytes": 1000000,
             "backup_count": 5
         }
-    }
+    },
+    "debug": false
 }
