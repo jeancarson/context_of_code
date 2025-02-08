@@ -76,8 +76,8 @@ def local_stats():
                 return jsonify({"error": "Failed to fetch metrics from local server"}), 500
         else:
             # When running locally, get metrics from cache
-            metrics = metrics_cache.get()
-        
+            metrics = metrics_cache.get_metrics()
+
         # For API calls that expect JSON
         if request.headers.get('Accept') == 'application/json':
             return metrics.to_json(indent=2)
@@ -89,6 +89,27 @@ def local_stats():
 @app.route('/static/<path:path>')
 def send_static(path):
     return send_from_directory(os.path.join(ROOT_DIR, 'static'), path)
+
+
+@app.route('/people', methods=['GET'])
+def people_get():
+    try:
+        return render_template('people.html')
+    except Exception as e:
+        logger.error(f"Failed to render people.html: {e}")
+        return "Failed to render people.html", 500
+
+@app.route('/people', methods=['POST'])
+def people_post():
+    try:
+        name = request.form.get('name')
+        if not name:
+            logger.error("Name is required")
+            return "Name is required", 400
+        return f"Hello {name}!", 200
+    except Exception as e:
+        logger.error(f"Failed to handle people POST request: {e}")
+        return "Failed to handle people POST request", 500
 
 if __name__ == "__main__":
     # Only run the Flask development server if we're not on PythonAnywhere
