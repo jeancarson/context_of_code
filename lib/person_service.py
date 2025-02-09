@@ -1,45 +1,65 @@
-from dataclasses import dataclass
 from typing import Dict, List, Optional
-from dataclasses_json import dataclass_json
-
-@dataclass_json
-@dataclass
-class Person:
-    name: str
-    dob: str
-    id: Optional[int] = None
+from .database import Person, get_db
+from sqlalchemy import select, insert, update, delete, text
 
 class PersonService:
     def __init__(self):
-        self._persons: Dict[int, Person] = {}
-        self._next_id: int = 1
+        self.db = next(get_db())
 
-    def create_person(self, name: str, dob: str) -> Person:
-        person = Person(name=name, dob=dob, id=self._next_id)
-        self._persons[self._next_id] = person
-        self._next_id += 1
-        return person
-
-    def get_person(self, person_id: int) -> Optional[Person]:
-        return self._persons.get(person_id)
-
-    def get_all_persons(self) -> List[Person]:
-        return list(self._persons.values())
-
-    def update_person(self, person_id: int, name: Optional[str] = None, dob: Optional[str] = None) -> Optional[Person]:
-        person = self._persons.get(person_id)
-        if person is None:
+    def _to_api_format(self, db_result) -> dict:
+        """Convert database result to API format"""
+        if not db_result:
             return None
-        
-        if name is not None:
-            person.name = name
-        if dob is not None:
-            person.dob = dob
-        
-        return person
+        return {
+            'name': db_result[0],  # Name
+            'dob': db_result[1],   # DOB
+            'id': db_result[2]     # rowid
+        }
 
-    def delete_person(self, person_id: int) -> bool:
-        if person_id not in self._persons:
-            return False
-        del self._persons[person_id]
-        return True
+    def create_person(self, name: str, dob: str) -> dict:
+        # Insert the person
+        stmt = insert(Person).values(Name=name, DOB=dob)
+        result = self.db.execute(stmt)
+        self.db.commit()
+
+        # Get the last inserted ROWID using SQLite's last_insert_rowid()
+        result = self.db.execute(text('SELECT last_insert_rowid() as id')).first()
+        rowid = result[0]
+
+        # Get the inserted record
+        stmt = text('SELECT Name, DOB, rowid FROM Person WHERE rowid = :rowid')
+        result = self.db.execute(stmt, {'rowid': rowid}).first()
+        return self._to_api_format(result)
+
+    def get_person(self, rowid: int) -> Optional[dict]:
+        stmt = text('SELECT Name, DOB, rowid FROM Person WHERE rowid = :rowid')
+        result = self.db.execute(stmt, {'rowid': rowid}).first()
+        return self._to_api_format(result)
+
+    def get_all_persons(self) -> List[dict]:
+        stmt = text('SELECT Name, DOB, rowid FROM Person')
+        results = self.db.execute(stmt).all()
+        return [self._to_api_format(row) for row in results]
+
+    def update_person(self, rowid: int, name: str, dob: str) -> Optional[dict]:
+        stmt = text('UPDATE Person SET Name = :name, DOB = :dob WHERE rowid = :rowid')
+        result = self.db.execute(stmt, {'name': name, 'dob': dob, 'rowid': rowid})
+        self.db.commit()
+        
+        if result.rowcount > 0:
+            stmt = text('SELECT Name, DOB, rowid FROM Person WHERE rowid = :rowid')
+            result = self.db.execute(stmt, {'rowid': rowid}).first()
+            return self._to_api_format(result)
+        return None
+
+    def delete_person(self, rowid: int) -> bool:
+        # First verify the person exists
+        stmt = text('SELECT 1 FROM Person WHERE rowid = :rowid')
+        exists = self.db.execute(stmt, {'rowid': rowid}).first() is not None
+        
+        if exists:
+            stmt = text('DELETE FROM Person WHERE rowid = :rowid')
+            self.db.execute(stmt, {'rowid': rowid})
+            self.db.commit()
+            return True
+        return False

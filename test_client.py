@@ -76,7 +76,7 @@ def run_tests():
     
     try:
         # Test creating a person
-        person = client.create_person("John Doe", "1990-01-01")
+        person = client.create_person("new test", "1990-01-01")
         person_id = person[PersonField.ID.value]
 
         # Test getting all persons
