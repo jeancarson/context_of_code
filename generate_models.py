@@ -2,6 +2,8 @@ from sqlacodegen.codegen import CodeGenerator
 from sqlalchemy import create_engine
 import os
 
+#one time set up script
+
 # Get absolute path to db.db
 current_dir = os.path.dirname(os.path.abspath(__file__))
 db_path = os.path.join(current_dir, 'db.db')
