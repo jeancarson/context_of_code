@@ -1,6 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>System Metrics Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
@@ -20,145 +22,52 @@
             background-color: #0d6efd;
             transition: width 0.5s ease-in-out;
         }
-        .remote-metrics {
-            margin-top: 2rem;
-            padding-top: 2rem;
-            border-top: 1px solid #dee2e6;
+        .container {
+            max-width: 800px;
+            margin: auto;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        .box {
+            display: block;
+            text-decoration: none;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: background 0.3s ease;
+        }
+        .box:hover {
+            background: #e2e6ea;
+        }
+        .no-data {
+            text-align: center;
+            color: #777;
         }
     </style>
 </head>
 <body class="bg-light">
-    <div class="container py-5">
-        <!-- Local Machine Metrics -->
-        <div class="local-metrics mb-5">
-            <h2 class="mb-4 text-center">Local Machine Metrics</h2>
-            <div class="text-center mb-3">
-                <h5>{{ metrics.device_info.hostname }}</h5>
-                <small class="text-muted">{{ metrics.device_info.os_type }} ({{ metrics.device_info.os_version }})</small>
-            </div>
-            <p class="text-muted text-center mb-4">Last updated: <span id="local-timestamp">{{ metrics.metrics[0].timestamp if metrics.metrics else 'N/A' }}</span></p>
-            
-            <div class="row">
-                <!-- CPU Card -->
-                <div class="col-md-6 mb-4">
-                    <div class="card metric-card h-100 shadow-sm">
-                        <div class="card-body">
-                            <h5 class="card-title">CPU</h5>
-                            <div class="mb-3">
-                                <label class="form-label">Usage</label>
-                                {% set cpu_usage = metrics.get_metric_value('cpu_usage') %}
-                                <div class="usage-bar">
-                                    <div class="usage-fill" style="width: {{ cpu_usage if cpu_usage is not none else 0 }}%"></div>
-                                </div>
-                                <small class="text-muted">{{ metrics.get_formatted_value('cpu_usage') }}</small>
-                            </div>
-                            {% set cpu_temp = metrics.get_metric_value('cpu_temperature') %}
-                            {% if cpu_temp is not none %}
-                            <div>
-                                <label class="form-label">Temperature</label>
-                                <div class="h4 mb-0 {{ 'temperature-normal' if cpu_temp < 70 else 'temperature-warning' if cpu_temp < 80 else 'temperature-danger' }}">
-                                    {{ "%.1f°C"|format(cpu_temp) }}
-                                </div>
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Memory Card -->
-                <div class="col-md-6 mb-4">
-                    <div class="card metric-card h-100 shadow-sm">
-                        <div class="card-body">
-                            <h5 class="card-title">Memory</h5>
-                            <div class="mb-3">
-                                <label class="form-label">Usage</label>
-                                {% set memory_usage = metrics.get_metric_value('memory_usage') %}
-                                <div class="usage-bar">
-                                    <div class="usage-fill" style="width: {{ memory_usage if memory_usage is not none else 0 }}%"></div>
-                                </div>
-                                <small class="text-muted">{{ metrics.get_formatted_value('memory_usage') }}</small>
-                            </div>
-                            <div>
-                                <label class="form-label">Available / Total</label>
-                                <div class="h4 mb-0">
-                                    {{ metrics.get_formatted_value('memory_available') }} / {{ metrics.get_formatted_value('memory_total') }}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Remote Machines Metrics -->
-        <div class="remote-metrics">
-            <h2 class="mb-4 text-center">Remote Machines</h2>
-            {% if remote_metrics %}
-                {% for machine_id, metrics in remote_metrics.items() %}
-                <div class="machine-metrics mb-5">
-                    <h4 class="mb-3">Machine: {{ machine_id }}</h4>
-                    <p class="text-muted mb-4">Last updated: {{ metrics.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</p>
-                    
-                    <div class="row">
-                        <!-- CPU Card -->
-                        <div class="col-md-6 mb-4">
-                            <div class="card metric-card h-100 shadow-sm">
-                                <div class="card-body">
-                                    <h5 class="card-title">CPU</h5>
-                                    <div class="mb-3">
-                                        <label class="form-label">Usage</label>
-                                        <div class="usage-bar">
-                                            <div class="usage-fill" style="width: {{ metrics.cpu_percent }}%"></div>
-                                        </div>
-                                        <small class="text-muted">{{ "%.1f%%"|format(metrics.cpu_percent) }}</small>
-                                    </div>
-                                    {% if metrics.cpu_temp %}
-                                    <div>
-                                        <label class="form-label">Temperature</label>
-                                        <div class="h4 mb-0 {{ 'temperature-normal' if metrics.cpu_temp < 70 else 'temperature-warning' if metrics.cpu_temp < 80 else 'temperature-danger' }}">
-                                            {{ "%.1f°C"|format(metrics.cpu_temp) }}
-                                        </div>
-                                    </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Memory Card -->
-                        <div class="col-md-6 mb-4">
-                            <div class="card metric-card h-100 shadow-sm">
-                                <div class="card-body">
-                                    <h5 class="card-title">Memory</h5>
-                                    <div class="mb-3">
-                                        <label class="form-label">Usage</label>
-                                        <div class="usage-bar">
-                                            <div class="usage-fill" style="width: {{ metrics.memory_percent }}%"></div>
-                                        </div>
-                                        <small class="text-muted">{{ "%.1f%%"|format(metrics.memory_percent) }}</small>
-                                    </div>
-                                    <div>
-                                        <label class="form-label">Available / Total</label>
-                                        <div class="h4 mb-0">
-                                            {{ "%.1f GB"|format(metrics.memory_available_gb) }} / {{ "%.1f GB"|format(metrics.memory_total_gb) }}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                {% endfor %}
-            {% else %}
-                <p class="text-center text-muted">No remote machines connected</p>
-            {% endif %}
-        </div>
+    <div class="container">
+        {% if remote_metrics %}
+            {% for machine_id, metrics in remote_metrics.items() %}
+                <a href="#" class="box">
+                    <h3>Machine: {{ machine_id }}</h3>
+                    <p>Last Updated: {{ metrics.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+                    <p>CPU Usage: {{ "%.1f"|format(metrics.cpu_percent) }}%</p>
+                    <p>Memory Usage: {{ "%.1f"|format(metrics.memory_percent) }}%</p>
+                    {% if metrics.cpu_temp %}
+                    <p>CPU Temperature: {{ "%.1f"|format(metrics.cpu_temp) }}°C</p>
+                    {% endif %}
+                    <p>Memory Available: {{ "%.1f"|format(metrics.memory_available_gb) }} GB</p>
+                    <p>Total Memory: {{ "%.1f"|format(metrics.memory_total_gb) }} GB</p>
+                </a>
+            {% endfor %}
+        {% else %}
+            <p class="no-data">No remote machines connected yet.</p>
+        {% endif %}
     </div>
-
-    <script>
-        // Auto-refresh the page every 30 seconds
-        setTimeout(function() {
-            window.location.reload();
-        }, 30000);
-    </script>
 </body>
 </html>

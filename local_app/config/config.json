@@ -1,0 +1,8 @@
+{
+    "api_url": "http://localhost:5000",
+    "poll_interval": 30,
+    "logging": {
+        "level": "INFO",
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    }
+}
