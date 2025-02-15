@@ -62,7 +62,6 @@ class MetricsService:
                     timestamp=timestamp,
                     cpu_percent=float(metrics_data['cpu_percent']),
                     memory_percent=float(metrics_data['memory_percent']),
-                    cpu_temp=float(metrics_data['cpu_temp']) if metrics_data.get('cpu_temp') is not None else None,
                     memory_available_gb=float(metrics_data['memory_available_gb']),
                     memory_total_gb=float(metrics_data['memory_total_gb']),
                     device_id=metrics_data.get('device_id', 'unknown')
@@ -77,7 +76,6 @@ class MetricsService:
                     'timestamp': metrics.timestamp.isoformat(),
                     'cpu_percent': metrics.cpu_percent,
                     'memory_percent': metrics.memory_percent,
-                    'cpu_temp': metrics.cpu_temp,
                     'memory_available_gb': metrics.memory_available_gb,
                     'memory_total_gb': metrics.memory_total_gb,
                     'device_id': metrics.device_id

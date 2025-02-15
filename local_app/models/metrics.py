@@ -7,7 +7,6 @@ class Metrics:
     timestamp: datetime
     cpu_percent: float
     memory_percent: float
-    cpu_temp: Optional[float]
     memory_available_gb: float
     memory_total_gb: float
     device_id: str
@@ -18,7 +17,6 @@ class Metrics:
             'timestamp': self.timestamp.isoformat(),
             'cpu_percent': self.cpu_percent,
             'memory_percent': self.memory_percent,
-            'cpu_temp': self.cpu_temp,
             'memory_available_gb': self.memory_available_gb,
             'memory_total_gb': self.memory_total_gb,
             'device_id': self.device_id
@@ -34,7 +32,6 @@ class Metrics:
             timestamp=timestamp,
             cpu_percent=float(data['cpu_percent']),
             memory_percent=float(data['memory_percent']),
-            cpu_temp=float(data['cpu_temp']) if data.get('cpu_temp') is not None else None,
             memory_available_gb=float(data['memory_available_gb']),
             memory_total_gb=float(data['memory_total_gb']),
             device_id=str(data.get('device_id', 'unknown'))
