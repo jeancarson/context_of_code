@@ -6,7 +6,6 @@ class SystemMetrics(BaseModel):
     """Model for system metrics data"""
     cpu_percent: float
     memory_percent: float
-    cpu_temp: Optional[float]
     memory_available_gb: float
     memory_total_gb: float
     timestamp: datetime = None
@@ -21,7 +20,6 @@ class SystemMetrics(BaseModel):
             "example": {
                 "cpu_percent": 45.2,
                 "memory_percent": 65.8,
-                "cpu_temp": 45.6,
                 "memory_available_gb": 8.5,
                 "memory_total_gb": 16.0,
                 "timestamp": "2025-02-15T18:54:14Z"
