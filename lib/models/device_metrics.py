@@ -6,7 +6,6 @@ from enum import Enum
 
 class MetricType(Enum):
     CPU_USAGE = "cpu_usage"
-    CPU_TEMPERATURE = "cpu_temperature"
     MEMORY_USAGE = "memory_usage"
     MEMORY_AVAILABLE = "memory_available"
     MEMORY_TOTAL = "memory_total"
@@ -94,16 +93,6 @@ class DeviceMetrics:
             )
         ]
 
-        # Add CPU temperature if available
-        if metrics.cpu_temp is not None:
-            metric_list.append(
-                Metric(
-                    name=MetricType.CPU_TEMPERATURE,
-                    value=metrics.cpu_temp,
-                    unit="celsius",
-                    timestamp=current_time
-                )
-            )
 
         return cls(
             device_info=device_info,
