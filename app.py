@@ -4,6 +4,9 @@ from lib.config import Config
 import logging
 from lib.models.remote_metrics import RemoteMetricsStore
 from lib.person_handler import PersonHandler
+from lib.metrics_service import MetricsService, ValidationError, get_db, Metrics
+from lib.constants import StatusCode
+import datetime
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +27,18 @@ remote_metrics_store = RemoteMetricsStore()
 # Initialize person handler
 person_handler = PersonHandler()
 
+# Initialize services
+metrics_service = MetricsService()
+
+# Verify database setup
+with get_db() as db:
+    try:
+        # Try to query the Metrics table
+        result = db.query(Metrics).first()
+        logger.info("Metrics table exists and is accessible")
+    except Exception as e:
+        logger.error(f"Error accessing Metrics table: {e}")
+
 @app.route("/")
 def hello():
     """Render the main page with system metrics"""
@@ -41,25 +56,49 @@ def metrics_page():
 def receive_metrics():
     """Receive metrics from remote machines"""
     if not request.is_json:
-        return jsonify({"error": "Content-Type must be application/json"}), 400
+        return jsonify({"error": "Content-Type must be application/json"}), StatusCode.BAD_REQUEST
     
     try:
         metrics_data = request.get_json()
-        # Use the request's remote address as machine_id for now
+        
+        # Store in the metrics database
+        result = metrics_service.create_metrics(metrics_data)
+        
+        # Also update the remote metrics store
         machine_id = request.remote_addr
         remote_metrics_store.update_metrics(machine_id, metrics_data)
         
-        # You can add commands or config updates here
-        response = {
-            "status": "ok",
-            # "command": "example_command",  # Uncomment to test command execution
-            # "config": {"poll_interval_seconds": 60}  # Uncomment to test config updates
-        }
-        return jsonify(response), 200
+        # Return the created metrics with 201 status
+        return jsonify(result), StatusCode.CREATED
         
+    except ValidationError as e:
+        return jsonify({"error": str(e)}), StatusCode.BAD_REQUEST
     except Exception as e:
         logger.error(f"Error processing metrics: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e)}), StatusCode.INTERNAL_ERROR
+
+@app.get("/metrics")
+def get_metrics():
+    """Get metrics with optional filtering"""
+    try:
+        device_id = request.args.get('device_id')
+        start_time = request.args.get('start_time')
+        end_time = request.args.get('end_time')
+        limit = request.args.get('limit', 1000, type=int)
+        
+        # Convert string timestamps to datetime if provided
+        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00')) if start_time else None
+        end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00')) if end_time else None
+        
+        result = metrics_service.get_metrics(
+            device_id=device_id,
+            start_time=start_dt,
+            end_time=end_dt,
+            limit=limit
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 # Add this route to serve static files
 @app.route('/static/<path:path>')

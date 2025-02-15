@@ -4,5 +4,9 @@
     "logging": {
         "level": "INFO",
         "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    },
+    "storage": {
+        "enable_local_backup": true,
+        "cleanup_after_days": 7
     }
 }
