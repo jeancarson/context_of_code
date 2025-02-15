@@ -34,10 +34,25 @@ class CacheConfig(BaseModel):
     enabled: bool
     duration_seconds: int
 
+class DatabaseConfig(BaseModel):
+    db_name: str = 'db.db'  # Default value, can be overridden
+    database_url: str
+
+    #@property allows you to define a method as a property, so you can call it like a normal attribute
+    @property
+    def db_path(self) -> str:
+        return os.path.join(ROOT_DIR, self.db_name)
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        if 'database_url' not in data:
+            self.database_url = f'sqlite:///{self.db_path}'
+
 class ConfigModel(BaseModel):
     server: ServerConfig
     cache: CacheConfig
     logging: LoggingConfig
+    database: DatabaseConfig
     debug: bool = False
 
 class FlaskFilter(logging.Filter):
@@ -132,3 +147,12 @@ class Config:
             self._config.logging.file.get_level() if self._config.logging.file.enabled else logging.CRITICAL
         )
         root_logger.setLevel(min_level)
+
+# Get the root directory of the project
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Load the configuration file
+config_instance = Config(os.path.join(ROOT_DIR, 'config.json'))
+
+# Get database configuration from the loaded config
+database = config_instance.database
