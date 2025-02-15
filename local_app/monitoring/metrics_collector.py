@@ -9,6 +9,7 @@ from queue import Queue
 import os
 from local_app.monitoring.system_monitor import SystemMonitor
 from local_app.models.system_metrics import SystemMetrics
+from lib.constants import StatusCode
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +56,18 @@ class MetricsCollector:
             
             # Convert to dict and ensure datetime is serialized
             metrics_dict = json.loads(metrics.json())
+            logger.info(f"Sending metrics to API: {metrics_dict}")
             
             response = requests.post(
-                f"{self.api_url}/metrics",  # Server expects /metrics endpoint
+                f"{self.api_url}/metrics",
                 json=metrics_dict,
                 headers=headers,
                 verify=True
             )
             
-            if response.status_code == 200:
+            logger.info(f"API Response: {response.status_code} - {response.text}")
+            
+            if response.status_code == StatusCode.CREATED:
                 logger.info(f"Successfully sent metrics to {self.api_url}")
                 response_data = response.json()
                 
