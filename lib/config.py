@@ -151,7 +151,8 @@ class Config:
 # Get the root directory of the project
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Database configuration
-database = DatabaseConfig(
-    db_name=os.getenv('DB_NAME', 'db.db'),  # Can be overridden by environment variable
-)
+# Load the configuration file
+config_instance = Config(os.path.join(ROOT_DIR, 'config.json'))
+
+# Get database configuration from the loaded config
+database = config_instance.database

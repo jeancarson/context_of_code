@@ -26,5 +26,8 @@
             "backup_count": 5
         }
     },
+    "database": {
+        "database_url": "sqlite:///db.db"
+    },
     "debug": false
 }
