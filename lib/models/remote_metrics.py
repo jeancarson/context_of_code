@@ -7,7 +7,6 @@ class RemoteMetrics(BaseModel):
     machine_id: str
     cpu_percent: float
     memory_percent: float
-    cpu_temp: Optional[float]
     memory_available_gb: float
     memory_total_gb: float
     timestamp: datetime = None

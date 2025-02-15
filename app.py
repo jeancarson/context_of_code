@@ -27,8 +27,7 @@ person_handler = PersonHandler()
 @app.route("/")
 def hello():
     """Render the main page with system metrics"""
-    metrics = remote_metrics_store.get_latest_metrics()
-    return render_template('index.html', metrics=metrics)
+    return render_template('index.html', remote_metrics=remote_metrics_store.get_all_metrics())
 
 @app.route("/metrics")
 def metrics_page():

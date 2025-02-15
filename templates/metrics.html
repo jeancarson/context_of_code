@@ -8,9 +8,6 @@
     <style>
         .metric-card { transition: transform 0.2s; }
         .metric-card:hover { transform: scale(1.02); }
-        .temperature-normal { color: #28a745; }
-        .temperature-warning { color: #ffc107; }
-        .temperature-danger { color: #dc3545; }
         .usage-bar {
             height: 10px;
             border-radius: 5px;
@@ -58,9 +55,6 @@
                     <p>Last Updated: {{ metrics.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</p>
                     <p>CPU Usage: {{ "%.1f"|format(metrics.cpu_percent) }}%</p>
                     <p>Memory Usage: {{ "%.1f"|format(metrics.memory_percent) }}%</p>
-                    {% if metrics.cpu_temp %}
-                    <p>CPU Temperature: {{ "%.1f"|format(metrics.cpu_temp) }}°C</p>
-                    {% endif %}
                     <p>Memory Available: {{ "%.1f"|format(metrics.memory_available_gb) }} GB</p>
                     <p>Total Memory: {{ "%.1f"|format(metrics.memory_total_gb) }} GB</p>
                 </a>
