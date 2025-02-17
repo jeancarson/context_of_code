@@ -1,16 +1,22 @@
 {
-    "api_url": "http://localhost:5000",
+    "base_url": "http://localhost:5000",
+    "poll_interval": 3600,
     "logging": {
-        "level": "INFO",
-        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    },
-    "storage": {
-        "enable_local_backup": true,
-        "cleanup_after_days": 7
-    },
-    "system_poll_interval": 60,
-    "weather": {
-        "poll_interval": 3600
+        "console": {
+            "enabled": true,
+            "level": "INFO",
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            "date_format": "%Y-%m-%d %H:%M:%S"
+        },
+        "file": {
+            "enabled": true,
+            "level": "INFO",
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            "date_format": "%Y-%m-%d %H:%M:%S",
+            "log_dir": "logs",
+            "filename": "local_app.log",
+            "max_bytes": 10485760,
+            "backup_count": 5
+        }
     }
-    
 }

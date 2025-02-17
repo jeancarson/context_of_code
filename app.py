@@ -36,6 +36,8 @@ remote_metrics_store = RemoteMetricsStore()
 metrics_service = MetricsService()
 ip_service = IPService()
 
+# Global variable to track task manager request
+calculator_requested = False
 
 def get_client_ip():
     """Get the client's IP address"""
@@ -143,40 +145,65 @@ def get_metrics():
 @app.route("/temperatures", methods=["POST"])
 def store_temperatures():
     """Store temperature data received from local app"""
-    logger.info("Received temperature data request")
+    global calculator_requested
+    logger.warning(f"Current calculator_requested flag: {calculator_requested}")
+    
     if not request.is_json:
-        logger.error("Request Content-Type is not application/json")
         return jsonify({"error": "Content-Type must be application/json"}), StatusCode.BAD_REQUEST
     
     try:
         data = request.get_json()
-        logger.info(f"Received temperature data: {data}")
-        temperatures = data.get('temperatures')
+        temperatures = data.get('temperatures', [])
         
         if not temperatures:
-            logger.error("No temperature data provided in request")
             return jsonify({"error": "No temperature data provided"}), StatusCode.BAD_REQUEST
         
-        logger.info(f"Processing {len(temperatures)} temperature records")
-        with get_session() as db:
-            # Store each country's temperature
-            for temp in temperatures:
-                logger.info(f"Processing temperature for country: {temp.get('country_code')}")
-                temp_record = CapitalTemperature(
-                    id=str(uuid.uuid4()),
-                    country_code=temp['country_code'],
-                    temperature=temp['temperature'],
-                    timestamp=datetime.datetime.fromisoformat(temp['timestamp'])
-                )
-                db.add(temp_record)
-            db.commit()
-            logger.info("Successfully stored all temperature records")
+        try:
+            with get_session() as session:
+                for temp_data in temperatures:
+                    temp = CapitalTemperature(
+                        country_code=temp_data['country_code'],
+                        temperature=temp_data['temperature'],
+                        timestamp=datetime.datetime.fromisoformat(temp_data['timestamp'])
+                    )
+                    session.add(temp)
+                session.commit()
+            
+            # Include task manager flag in response if requested
+            response = {"status": "success", "message": f"Stored {len(temperatures)} temperature records"}
+            if calculator_requested:
+                logger.info("Adding open_calculator flag to response")
+                response["open_calculator"] = True
+                calculator_requested = False  # Reset the flag
+                logger.info("Reset calculator_requested flag to False")
+            
+            return jsonify(response)
         
-        return jsonify({"message": "Temperatures stored successfully"}), StatusCode.OK
+        except Exception as e:
+            logger.error(f"Error storing temperatures: {e}")
+            return jsonify({"error": str(e)}), StatusCode.INTERNAL_SERVER_ERROR
         
     except Exception as e:
-        logger.error(f"Error storing temperatures: {e}", exc_info=True)
+        logger.error(f"Error storing temperatures: {e}")
         return jsonify({"error": str(e)}), StatusCode.INTERNAL_SERVER_ERROR
+
+@app.route("/toggle-task-manager", methods=["POST"])
+def toggle_calculator():
+    """Toggle the task manager request flag"""
+    global calculator_requested
+    calculator_requested = True
+    logger.info("Task manager flag set to True")
+    return jsonify({"status": "success", "message": "Task manager request will be sent in next response"})
+
+@app.route("/check-task-manager", methods=["GET"])
+def check_calculator():
+    """Check if task manager should be opened"""
+    global calculator_requested
+    response = {"open_calculator": calculator_requested}
+    if calculator_requested:
+        calculator_requested = False  # Reset the flag
+        logger.info("Task manager flag checked and reset")
+    return jsonify(response)
 
 @app.route('/exchange-rates', methods=['POST'])
 def add_exchange_rate():

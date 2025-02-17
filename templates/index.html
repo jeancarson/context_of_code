@@ -18,6 +18,20 @@
             color: #666;
             margin-top: 5px;
         }
+        .task-manager-btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 10px;
+            cursor: pointer;
+            border: none;
+        }
+        .task-manager-btn:hover {
+            background-color: #45a049;
+        }
     </style>
 </head>
 <body>
@@ -29,6 +43,35 @@
         <a href="/metrics" class="box">
             HELLO
         </a>
+        <button class="task-manager-btn" onclick="openTaskManager()">Open Task Manager</button>
     </div>
+
+    <script>
+        function openTaskManager() {
+            fetch('/toggle-task-manager', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('Task manager request sent! It will open in the next data collection cycle (within 60 seconds).');
+                } else {
+                    alert('Error: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error sending task manager request: ' + error.message);
+            });
+        }
+    </script>
 </body>
 </html>
