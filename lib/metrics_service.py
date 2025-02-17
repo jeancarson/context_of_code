@@ -48,7 +48,6 @@ class MetricsService:
 
     def create_metrics(self, metrics_data: Dict[str, Any]) -> dict:
         """Create a new metrics entry"""
-        # Validate data before processing
         try:
             logger.info(f"Validating metrics data: {metrics_data}")
             self.validate_metrics_data(metrics_data)
@@ -59,13 +58,14 @@ class MetricsService:
                 
                 # Create new metrics entry
                 metrics = Metrics(
+                    device_id=metrics_data.get('device_id', 'unknown'),
                     timestamp=timestamp,
                     cpu_percent=float(metrics_data['cpu_percent']),
                     memory_percent=float(metrics_data['memory_percent']),
                     memory_available_gb=float(metrics_data['memory_available_gb']),
-                    memory_total_gb=float(metrics_data['memory_total_gb']),
-                    device_id=metrics_data.get('device_id', 'unknown')
+                    memory_total_gb=float(metrics_data['memory_total_gb'])
                 )
+                
                 logger.info(f"Creating metrics entry: {metrics}")
                 db.add(metrics)
                 db.flush()  # Flush to get the ID
@@ -80,6 +80,7 @@ class MetricsService:
                     'memory_total_gb': metrics.memory_total_gb,
                     'device_id': metrics.device_id
                 }
+                
         except ValidationError as e:
             logger.error(f"Validation error: {e}")
             raise
@@ -88,7 +89,7 @@ class MetricsService:
             raise
 
     def get_metrics(self, device_id: str = None, start_time: datetime = None, 
-                   end_time: datetime = None, limit: int = 1000) -> List[dict]:
+                   end_time: datetime = None, limit: int = 1000) -> List[Dict[str, Any]]:
         """Get metrics with optional filtering"""
         with get_db() as db:
             query = db.query(Metrics)
@@ -101,7 +102,7 @@ class MetricsService:
                 query = query.filter(Metrics.timestamp <= end_time)
                 
             query = query.order_by(Metrics.timestamp.desc()).limit(limit)
-            metrics_list = query.all()
+            metrics = query.all()
             
             return [{
                 'id': m.id,
@@ -111,4 +112,4 @@ class MetricsService:
                 'memory_available_gb': m.memory_available_gb,
                 'memory_total_gb': m.memory_total_gb,
                 'device_id': m.device_id
-            } for m in metrics_list]
+            } for m in metrics]

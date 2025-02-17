@@ -4,6 +4,7 @@ import os
 from contextlib import contextmanager
 from .models.generated_models import Base, Person
 from .models.metrics_model import Metrics
+from .models.visit_model import Visit
 from .config import database
 
 # Get the root directory of the project
