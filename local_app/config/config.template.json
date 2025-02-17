@@ -12,5 +12,8 @@
     "github": {
         "github_token": "",
         "poll_interval": 3600
+    },
+    "weather": {
+        "poll_interval": 3600
     }
 }

@@ -5,6 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GitHub Commits Per Capita</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .temperature {
+            color: #e63946;
+            font-weight: bold;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+    </style>
 </head>
 <body class="bg-gray-100">
     <div class="container mx-auto px-4 py-8">
@@ -26,6 +37,16 @@
                         <span class="text-gray-600">Commits per Million:</span>
                         <span class="font-bold text-blue-600">{{ country.commits_per_capita }}</span>
                     </div>
+                    {% if country.temperature %}
+                    <div class="flex justify-between border-t pt-4">
+                        <span class="text-gray-600">Capital City Temperature:</span>
+                        <span class="temperature">{{ "%.1f"|format(country.temperature) }}°C</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">Last updated:</span>
+                        <span class="timestamp">{{ country.temperature_timestamp }}</span>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
             {% endfor %}
