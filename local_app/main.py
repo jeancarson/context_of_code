@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from local_app.monitoring.metrics_collector import MetricsCollector
+from local_app.monitoring.fortune_collector import FortuneCollector
 
 def load_config():
     """Load configuration from config.json"""
@@ -32,17 +33,25 @@ def main():
             poll_interval=config.get("poll_interval", 30)
         )
         collector.start()
+
+        # Create and start fortune collector
+        fortune_collector = FortuneCollector(
+            api_url=config["api_url"],
+            poll_interval=config.get("fortune_poll_interval", 3600)  # Default to 1 hour
+        )
+        fortune_collector.start()
         
         # Keep the main thread alive
         try:
             while True:
                 input()  # Wait for Ctrl+C
         except KeyboardInterrupt:
-            logger.info("Stopping metrics collection...")
+            logger.info("Stopping collectors...")
             collector.stop()
+            fortune_collector.stop()
             
     except Exception as e:
-        logger.error(f"Failed to start metrics collection: {e}")
+        logger.error(f"Failed to start collection: {e}")
         
 if __name__ == "__main__":
     main()

@@ -1,5 +1,5 @@
 {
-    "api_url": "http://jeancarson.pythonanywhere.com",
+    "api_url": "http://localhost:5000",
     "logging": {
         "level": "INFO",
         "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

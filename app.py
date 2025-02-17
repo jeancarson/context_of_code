@@ -3,10 +3,11 @@ from flask import Flask, jsonify, send_from_directory, render_template, request
 from lib.config import Config
 import logging
 from lib.models.remote_metrics import RemoteMetricsStore
-from lib.person_handler import PersonHandler
 from lib.metrics_service import MetricsService, ValidationError, get_db, Metrics
+from lib.models.visit_model import Visit
 from lib.constants import StatusCode
 import datetime
+from sqlalchemy import select
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,9 +25,6 @@ app.config['SECRET_KEY'] = config.server.secret_key
 # Initialize remote metrics store
 remote_metrics_store = RemoteMetricsStore()
 
-# Initialize person handler
-person_handler = PersonHandler()
-
 # Initialize services
 metrics_service = MetricsService()
 
@@ -39,17 +37,50 @@ with get_db() as db:
     except Exception as e:
         logger.error(f"Error accessing Metrics table: {e}")
 
+def get_client_ip():
+    """Get the client's IP address"""
+    if request.headers.getlist("X-Forwarded-For"):
+        # If behind a proxy, get real IP
+        return request.headers.getlist("X-Forwarded-For")[0]
+    return request.remote_addr
+
 @app.route("/")
 def hello():
     """Render the main page with system metrics"""
-    return render_template('index.html', remote_metrics=remote_metrics_store.get_all_metrics())
+    # Get client IP
+    client_ip = get_client_ip()
+    
+    with get_db() as db:
+        # Get or create visit count for this IP
+        visit = db.query(Visit).filter_by(ip_address=client_ip).first()
+        
+        if not visit:
+            # First visit from this IP
+            visit = Visit(ip_address=client_ip)
+            db.add(visit)
+        else:
+            # Increment existing visit count
+            visit.count += 1
+            visit.last_visit = datetime.datetime.utcnow()
+        
+        db.commit()
+        count = visit.count
+    
+    return render_template(
+        'index.html', 
+        visit_count=count,
+        remote_metrics=remote_metrics_store.get_all_metrics()
+    )
 
 @app.route("/metrics")
 def metrics_page():
     """Display metrics dashboard"""
+    # Get latest metrics for all machines
+    remote_metrics = remote_metrics_store.get_all_metrics()
+    
     return render_template(
-        'metrics.html',
-        remote_metrics=remote_metrics_store.get_all_metrics()
+        "metrics.html",
+        remote_metrics=remote_metrics
     )
 
 @app.route("/metrics", methods=["POST"])
@@ -104,26 +135,6 @@ def get_metrics():
 @app.route('/static/<path:path>')
 def send_static(path):
     return send_from_directory('static', path)
-
-@app.route('/persons', methods=['GET'])
-def get_all_persons():
-    return jsonify(person_handler.get_all_persons())
-
-@app.route('/persons/<int:person_id>', methods=['GET'])
-def get_person(person_id):
-    return jsonify(person_handler.get_person(person_id))
-
-@app.route('/persons', methods=['POST'])
-def create_person():
-    return jsonify(person_handler.create_person(request.json))
-
-@app.route('/persons/<int:person_id>', methods=['PUT'])
-def update_person(person_id):
-    return jsonify(person_handler.update_person(person_id, request.json))
-
-@app.route('/persons/<int:person_id>', methods=['DELETE'])
-def delete_person(person_id):
-    return jsonify(person_handler.delete_person(person_id))
 
 if __name__ == "__main__":
     try:

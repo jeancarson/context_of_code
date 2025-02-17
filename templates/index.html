@@ -5,8 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hello Page</title>
     <link rel="stylesheet" href="static/styles.css">
+    <style>
+        .visit-banner {
+            background-color: #f0f0f0;
+            padding: 10px;
+            text-align: center;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+    </style>
 </head>
 <body>
+    <div class="visit-banner">
+        You have visited this page {{ visit_count }} time{% if visit_count != 1 %}s{% endif %}! WHhy are you so obsessed with me? 🤨
+    </div>
     <div class="container">
         <a href="/metrics" class="box">
             HELLO
