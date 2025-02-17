@@ -10,4 +10,3 @@ local_app/monitoring/data/*.jsonl
 # Database files
 *.db
 # Config files with sensitive data
-local_app/config/config.json

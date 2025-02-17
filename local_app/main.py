@@ -9,11 +9,10 @@ from datetime import datetime
 import threading
 from queue import Queue
 from local_app.monitoring.metrics_collector import MetricsCollector
-from local_app.collectors.github_collector import GitHubCollector
-from local_app.services.github_stats_service import GitHubStatsService
 from local_app.services.temperature_service import TemperatureService
-from local_app.models.github_stats import GitHubStats
 from local_app.models.temperature import Temperature
+from local_app.services.exchange_rate_service import ExchangeRateService
+from local_app.models.exchange_rates import ExchangeRate
 
 # Initialize logging
 logging.basicConfig(
@@ -32,94 +31,7 @@ def load_config():
         logger.error(f"Error loading config: {e}")
         sys.exit(1)
 
-class GitHubMonitor:
-    def __init__(self, base_url: str, github_config: dict):
-        self.github_service = GitHubStatsService(github_config.get('token'))
-        self.base_url = base_url
-        self.poll_interval = github_config.get('poll_interval', 3600)  # Default to 1 hour
-        self._running = False
-        self._retry_queue = Queue()
-        self._retry_thread = None
-    
-    def collect_and_send_data(self):
-        """Collect GitHub stats and send to server"""
-        try:
-            # Collect the data using GitHub service
-            stats = self.github_service.get_country_stats()
-            if not stats:
-                logger.warning("No GitHub stats available")
-                return
-            
-            # Convert stats to proper model objects
-            stats_models = [
-                GitHubStats(
-                    country_code=stat['country_code'],
-                    country_name=stat['country_name'],
-                    population=stat['population'],
-                    commit_count=stat['commit_count'],
-                    commits_per_capita=stat['commits_per_capita'],
-                    timestamp=datetime.fromisoformat(stat['timestamp'])
-                ) for stat in stats
-            ]
-            
-            # Send to server
-            response = requests.post(
-                f"{self.base_url}/github",
-                json={'stats': [stat.to_dict() for stat in stats_models]},
-                headers={'Content-Type': 'application/json'}
-            )
-            response.raise_for_status()
-            logger.info("Successfully sent GitHub stats")
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error sending GitHub stats: {e}")
-            # Queue for retry
-            self._retry_queue.put(stats)
-        except Exception as e:
-            logger.error(f"Error collecting GitHub stats: {e}")
-    
-    def _retry_failed_requests(self):
-        """Retry failed requests"""
-        while self._running:
-            try:
-                if not self._retry_queue.empty():
-                    stats = self._retry_queue.get()
-                    response = requests.post(
-                        f"{self.base_url}/github",
-                        json={'stats': [stat.to_dict() for stat in stats]},
-                        headers={'Content-Type': 'application/json'}
-                    )
-                    response.raise_for_status()
-                    logger.info("Successfully resent queued stats")
-                time.sleep(60)  # Check every minute
-            except Exception as e:
-                logger.error(f"Error in retry loop: {e}")
-                self._retry_queue.put(stats)  # Put back in queue
-    
-    def start(self):
-        """Start the monitoring process"""
-        self._running = True
-        
-        # Start retry thread
-        self._retry_thread = threading.Thread(target=self._retry_failed_requests)
-        self._retry_thread.daemon = True
-        self._retry_thread.start()
-        
-        # Main collection loop
-        while self._running:
-            try:
-                self.collect_and_send_data()
-                time.sleep(self.poll_interval)
-            except Exception as e:
-                logger.error(f"Error in monitoring loop: {e}")
-                time.sleep(60)  # Wait a bit before retrying
-    
-    def stop(self):
-        """Stop the monitoring process"""
-        self._running = False
-        if self._retry_thread:
-            self._retry_thread.join()
-
+#TODO these should probably be seperate files
 class TemperatureMonitor:
     def __init__(self, base_url: str, weather_config: dict):
         self.temperature_service = TemperatureService()  # No API key needed
@@ -217,6 +129,110 @@ class TemperatureMonitor:
         if self._retry_thread:
             self._retry_thread.join()
 
+class LondonMonitor:
+    def __init__(self, base_url: str, config: dict):
+        self.temperature_service = TemperatureService()
+        self.exchange_service = ExchangeRateService()
+        self.base_url = base_url
+        self.poll_interval = config.get('poll_interval', 3600)
+        self._running = False
+        self._retry_queue = Queue()
+        self._retry_thread = None
+
+    def collect_and_send_data(self):
+        try:
+            # Get temperature
+            temp = self.temperature_service.get_temperature('London')
+            if temp:
+                temp_model = Temperature(
+                    city='London',
+                    temperature=temp,
+                    timestamp=datetime.utcnow()
+                )
+                self._send_data('temperatures', temp_model.to_dict())
+
+            # Get exchange rate
+            rate = self.exchange_service.get_current_rate()
+            if rate:
+                rate_model = ExchangeRate(
+                    rate=rate,
+                    timestamp=datetime.utcnow()
+                )
+                self._send_data('exchange-rates', rate_model.to_dict())
+
+        except Exception as e:
+            logger.error(f"Error collecting data: {e}")
+
+    def _send_data(self, endpoint: str, data: dict):
+        try:
+            response = requests.post(
+                f"{self.base_url}/{endpoint}",
+                json=data,
+                headers={'Content-Type': 'application/json'}
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully sent {endpoint} data")
+        except Exception as e:
+            logger.error(f"Error sending {endpoint} data: {e}")
+            self._retry_queue.put((endpoint, data))
+
+class ExchangeRateMonitor:
+    def __init__(self, base_url: str, config: dict):
+        self.exchange_service = ExchangeRateService()
+        self.base_url = base_url
+        self.poll_interval = config.get('poll_interval', 3600)
+        self._running = False
+        self._retry_queue = Queue()
+        self._retry_thread = None
+
+    def collect_and_send_data(self):
+        try:
+            # Get exchange rate
+            rate = self.exchange_service.get_current_rate()
+            if rate:
+                logger.info(f"Raw exchange rate value: {rate}")  # Add this line
+                rate_model = ExchangeRate(
+                    rate=rate,
+                    timestamp=datetime.utcnow()
+                )
+                self._send_data('exchange-rates', rate_model.to_dict())
+
+        except Exception as e:
+            logger.error(f"Error collecting exchange rate data: {e}")
+
+    def _send_data(self, endpoint: str, data: dict):
+        try:
+            response = requests.post(
+                f"{self.base_url}/{endpoint}",
+                json=data,
+                headers={'Content-Type': 'application/json'}
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully sent exchange rate data")
+        except Exception as e:
+            logger.error(f"Error sending exchange rate data: {e}")
+            self._retry_queue.put((endpoint, data))
+
+    def start(self):
+        """Start the monitoring process"""
+        logger.info("Starting exchange rate monitoring...")
+        self._running = True
+        
+        # Main collection loop
+        while self._running:
+            try:
+                logger.info("Collecting exchange rate data...")
+                self.collect_and_send_data()
+                logger.info(f"Sleeping for {self.poll_interval} seconds...")
+                time.sleep(self.poll_interval)
+            except Exception as e:
+                logger.error(f"Error in exchange rate monitoring loop: {e}")
+                time.sleep(60)  # Wait a bit before retrying
+
+    def stop(self):
+        """Stop the monitoring process"""
+        self._running = False
+
 def main():
     """Main entry point for the monitoring application"""
     try:
@@ -224,9 +240,9 @@ def main():
         config = load_config()
         
         # Initialize monitors
-        github_monitor = GitHubMonitor(
+        exchange_monitor = ExchangeRateMonitor(
             base_url=config['api_url'],
-            github_config=config['github']
+            config=config.get('exchange', {'poll_interval': 3600})  # Default 1 hour if not specified
         )
         
         temperature_monitor = TemperatureMonitor(
@@ -234,7 +250,6 @@ def main():
             weather_config=config['weather']
         )
         
-        # Initialize metrics collector
         metrics_collector = MetricsCollector(
             api_url=config['api_url'],
             poll_interval=config.get('metrics', {}).get('poll_interval', 30)
@@ -243,7 +258,7 @@ def main():
         # Set up signal handlers
         def signal_handler(signum, frame):
             logger.info("Shutting down...")
-            github_monitor.stop()
+            exchange_monitor.stop()
             temperature_monitor.stop()
             metrics_collector.stop()
             sys.exit(0)
@@ -252,15 +267,15 @@ def main():
         signal.signal(signal.SIGTERM, signal_handler)
         
         # Start monitors in separate threads
-        github_thread = threading.Thread(target=github_monitor.start)
+        exchange_thread = threading.Thread(target=exchange_monitor.start)
         temp_thread = threading.Thread(target=temperature_monitor.start)
         metrics_thread = threading.Thread(target=metrics_collector.start)
         
-        github_thread.daemon = True
+        exchange_thread.daemon = True
         temp_thread.daemon = True
         metrics_thread.daemon = True
         
-        github_thread.start()
+        exchange_thread.start()
         temp_thread.start()
         metrics_thread.start()
         

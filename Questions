@@ -7,3 +7,5 @@ should requirments.txt be installed automatically or after setting up venv?
 
 
 should logger be called as self.logger?
+
+I think all my data is sent every tick, should it only be sent when we access that page? Or is that bad practice

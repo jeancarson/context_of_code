@@ -4,8 +4,6 @@ import os
 from contextlib import contextmanager
 from .models.generated_models import Base, Person, Metrics
 from .models.visit_model import Visit
-from .models.country_commits_model import CountryCommits
-from .models.country_model import Country
 from .models.temperature_model import CapitalTemperature
 from .config import database
 import logging
@@ -15,9 +13,6 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Create engine and session
 engine = create_engine(database.database_url)
-
-# Create all tables in the correct order
-Base.metadata.create_all(engine)
 
 # Create a scoped session factory
 Session = scoped_session(sessionmaker(bind=engine))
@@ -43,37 +38,14 @@ def get_db():
         Session.remove()
 
 def init_db():
-    """Initialize the database, creating all tables and dropping old ones"""
-    # Use the configured database URL
-    engine = create_engine(database.database_url)
-    
-    # Get metadata of existing tables
-    metadata = MetaData()
-    metadata.reflect(bind=engine)
-    
-    # Drop all existing tables
-    metadata.drop_all(bind=engine)
-    
-    # Create all tables in the correct order
-    Base.metadata.create_all(bind=engine)
-    
-    # Create a session to initialize any required data
-    with get_db() as db:
-        try:
-            # Initialize any required data here
-            countries = [
-                {'code': 'IE', 'name': 'Ireland', 'capital': 'Dublin'},
-                {'code': 'GB', 'name': 'United Kingdom', 'capital': 'London'},
-                {'code': 'FR', 'name': 'France', 'capital': 'Paris'}
-            ]
-            
-            for country_data in countries:
-                if not db.query(Country).filter_by(code=country_data['code']).first():
-                    country = Country(**country_data)
-                    db.add(country)
-        except Exception as e:
-            logging.error(f"Error initializing database: {e}")
-            raise
+    """Initialize the database, creating only missing tables"""
+    try:
+        # Create tables if they don't exist
+        Base.metadata.create_all(bind=engine)
+        logging.info("Database tables verified/created successfully")
+    except Exception as e:
+        logging.error(f"Error initializing database: {e}")
+        raise
 
 # Alias get_db as get_session for compatibility
 get_session = get_db

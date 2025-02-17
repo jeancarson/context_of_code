@@ -12,4 +12,5 @@
     "weather": {
         "poll_interval": 3600
     }
+    
 }

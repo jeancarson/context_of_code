@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>London Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h2>London Statistics</h2>
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <h3>Temperature</h3>
+                    <p>{{ temperature }}°C</p>
+                </div>
+                <div class="stat-item">
+                    <h3>GBP/EUR Rate</h3>
+                    <p>€{{ exchange_rate }}</p>
+                </div>
+            </div>
+            <div class="timestamp">Last updated: {{ last_updated }}</div>
+        </div>
+    </div>
+</body>
+</html>

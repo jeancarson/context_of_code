@@ -2,7 +2,12 @@ from typing import Optional
 
 from sqlalchemy import DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-import datetime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, String, Float, DateTime, Integer
+import uuid
+from datetime import datetime
+
+Base = declarative_base()
 
 class Base(DeclarativeBase):
     pass
@@ -11,7 +16,7 @@ class Base(DeclarativeBase):
 class Metrics(Base):
     __tablename__ = 'Metrics'
 
-    timestamp: Mapped[datetime.datetime] = mapped_column(DateTime)
+    timestamp: Mapped[datetime] = mapped_column(DateTime)
     cpu_percent: Mapped[float] = mapped_column(Float)
     memory_percent: Mapped[float] = mapped_column(Float)
     memory_available_gb: Mapped[float] = mapped_column(Float)
@@ -27,3 +32,11 @@ class Person(Base):
     Name: Mapped[Optional[str]] = mapped_column(Text)
     DOB: Mapped[Optional[str]] = mapped_column(Text)
     ROWID: Mapped[Optional[int]] = mapped_column(Integer, primary_key=True)
+
+
+class ExchangeRates(Base):
+    __tablename__ = 'exchange_rates'
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    rate = Column(Float, nullable=False)
+    timestamp = Column(DateTime, nullable=False)

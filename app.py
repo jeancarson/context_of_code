@@ -2,7 +2,6 @@ import os
 from flask import Flask, jsonify, send_from_directory, request, render_template
 from lib.config import Config
 import logging
-from lib.models.country_commits_model import CountryCommits
 from lib.models.temperature_model import CapitalTemperature
 from lib.database import init_db, get_session
 from lib.constants import StatusCode
@@ -14,6 +13,9 @@ from lib.ip_service import IPService
 from lib.models.remote_metrics import RemoteMetricsStore
 from lib.metrics_service import MetricsService, ValidationError, get_db, Metrics
 from lib.models.visit_model import Visit
+from sqlalchemy import desc
+from lib.models.generated_models import ExchangeRates
+
 
 
 # Compute root directory once and use it throughout the file
@@ -137,71 +139,6 @@ def get_metrics():
     except Exception as e:
         return jsonify({"error": str(e)}), StatusCode.BAD_REQUEST
 
-@app.route("/github", methods=["GET", "POST"])
-def github():
-    """Handle GitHub stats - both display and data submission"""
-    if request.method == "POST":
-        # Handle data submission
-        if not request.is_json:
-            return jsonify({"error": "Content-Type must be application/json"}), StatusCode.BAD_REQUEST
-        
-        try:
-            data = request.get_json()
-            stats = data.get('stats')
-            
-            if not stats:
-                return jsonify({"error": "No stats data provided"}), StatusCode.BAD_REQUEST
-            
-            with get_session() as db:
-                # Store each country's stats
-                for stat in stats:
-                    stat_record = CountryCommits(
-                        id=str(uuid.uuid4()),
-                        country_code=stat['country_code'],
-                        country_name=stat['country_name'],
-                        population=stat['population'],
-                        commit_count=stat['commit_count'],
-                        commits_per_capita=stat['commits_per_capita'],
-                        timestamp=datetime.datetime.fromisoformat(stat['timestamp'])
-                    )
-                    db.add(stat_record)
-                db.commit()
-            
-            return jsonify({"message": "GitHub stats stored successfully"}), StatusCode.OK
-            
-        except Exception as e:
-            logger.error(f"Error storing GitHub stats: {e}")
-            return jsonify({"error": str(e)}), StatusCode.INTERNAL_SERVER_ERROR
-    
-    else:  # GET request
-        try:
-            with get_session() as db:
-                # Get latest stats with temperature data using model method
-                stats = CountryCommits.get_latest_stats_with_temperature(db)
-                
-                return render_template(
-                    'github_stats.html',
-                    countries=[{
-                        'country_code': stat[0].country_code,
-                        'country_name': stat[0].country_name,
-                        'population': stat[0].population,
-                        'commit_count': stat[0].commit_count,
-                        'commits_per_capita': stat[0].commits_per_capita,
-                        'timestamp': stat[0].timestamp.strftime('%Y-%m-%d %H:%M:%S UTC'),
-                        'temperature': stat[1].temperature if stat[1] else None,
-                        'temperature_timestamp': stat[1].timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') if stat[1] else None
-                    } for stat in stats],
-                    last_updated=stats[0][0].timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') if stats else 'Never'
-                )
-                
-        except Exception as e:
-            logger.error(f"Error retrieving GitHub stats: {e}")
-            return render_template(
-                'github_stats.html',
-                countries=[],
-                last_updated='Error retrieving data',
-                error=str(e)
-            )
 
 @app.route("/temperatures", methods=["POST"])
 def store_temperatures():
@@ -240,6 +177,79 @@ def store_temperatures():
     except Exception as e:
         logger.error(f"Error storing temperatures: {e}", exc_info=True)
         return jsonify({"error": str(e)}), StatusCode.INTERNAL_SERVER_ERROR
+
+@app.route('/exchange-rates', methods=['POST'])
+def add_exchange_rate():
+    """Store exchange rate data received from local app"""
+    logger.info("Received exchange rate data request")
+    if not request.is_json:
+        logger.error("Request Content-Type is not application/json")
+        return jsonify({"error": "Content-Type must be application/json"}), StatusCode.BAD_REQUEST
+    
+    try:
+        data = request.get_json()
+        logger.info(f"Received exchange rate data: {data}")
+        
+        with get_session() as db:
+            # Get the last update time
+            last_update = db.query(ExchangeRates)\
+                .order_by(desc(ExchangeRates.timestamp))\
+                .first()
+            
+            # Only update if newer data or no existing data
+            if not last_update or data['timestamp'] > last_update.timestamp.isoformat():
+                rate_record = ExchangeRates(
+                    rate=data['rate'],
+                    timestamp=datetime.datetime.fromisoformat(data['timestamp'])
+                )
+                db.add(rate_record)
+                db.commit()
+                logger.info("Successfully stored exchange rate record")
+                return jsonify({"message": "Exchange rate stored successfully"}), StatusCode.OK
+            else:
+                logger.info("Skipping older exchange rate data")
+                return jsonify({"message": "Skipped older data"}), StatusCode.OK
+        
+    except Exception as e:
+        logger.error(f"Error storing exchange rate: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), StatusCode.INTERNAL_SERVER_ERROR
+
+
+@app.route("/london")
+def london_dashboard():
+    """Display London dashboard with temperature and exchange rate"""
+    logger.info("Loading London dashboard")
+    try:
+        with get_session() as db:
+            # Get latest temperature for London
+            latest_temp = db.query(CapitalTemperature)\
+                .filter(CapitalTemperature.country_code == 'GB')\
+                .order_by(desc(CapitalTemperature.timestamp))\
+                .first()
+
+            # Get latest exchange rate
+            latest_rate = db.query(ExchangeRates)\
+                .order_by(desc(ExchangeRates.timestamp))\
+                .first()
+
+            # Get last updated time
+            last_updated = None
+            if latest_temp and latest_rate:
+                last_updated = max(latest_temp.timestamp, latest_rate.timestamp)
+            elif latest_temp:
+                last_updated = latest_temp.timestamp
+            elif latest_rate:
+                last_updated = latest_rate.timestamp
+
+            return render_template(
+                'london.html',
+                temperature=latest_temp.temperature if latest_temp else 'N/A',
+                exchange_rate=f"{latest_rate.rate:.6f}" if latest_rate else 'N/A',
+                last_updated=last_updated.strftime('%Y-%m-%d %H:%M:%S UTC') if last_updated else 'Never'
+            )
+    except Exception as e:
+        logger.error(f"Error loading London dashboard: {e}", exc_info=True)
+        return jsonify({"error": "Failed to load dashboard"}), StatusCode.INTERNAL_SERVER_ERROR
 
 @app.route('/static/<path:path>')
 def send_static(path):
