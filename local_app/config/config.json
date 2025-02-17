@@ -7,5 +7,7 @@
     "storage": {
         "enable_local_backup": true,
         "cleanup_after_days": 7
-    }
+    },
+    "metrics_url": "http://localhost:5000/metrics",
+    "system_poll_interval": 60
 }
