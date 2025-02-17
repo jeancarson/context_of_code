@@ -1,57 +1,49 @@
-import os
 import json
-import logging
-from local_app.monitoring.metrics_collector import MetricsCollector
-from local_app.monitoring.fortune_collector import FortuneCollector
+import os
+import signal
+import sys
+from local_app.monitoring.system_monitor import SystemMonitor
+from local_app.monitoring.remote_metrics import RemoteMetricsStore
 
 def load_config():
-    """Load configuration from config.json"""
+    """Load configuration from JSON file"""
     config_path = os.path.join(os.path.dirname(__file__), "config", "config.json")
-    with open(config_path) as f:
-        return json.load(f)
-
-def setup_logging():
-    """Setup logging configuration"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    try:
+        with open(config_path) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        sys.exit(1)
 
 def main():
-    """Main entry point for the metrics collector"""
-    # Setup logging
-    setup_logging()
-    logger = logging.getLogger(__name__)
-    
+    """Main entry point for the monitoring application"""
     try:
         # Load configuration
         config = load_config()
         
-        # Create and start metrics collector
-        collector = MetricsCollector(
-            api_url=config["api_url"],
-            poll_interval=config.get("poll_interval", 30)
+        # Create and start system monitor
+        system_monitor = SystemMonitor(
+            metrics_url=config["metrics_url"],
+            poll_interval=config.get("system_poll_interval", 60)  # Default to 1 minute
         )
-        collector.start()
+        system_monitor.start()
 
-        # Create and start fortune collector
-        fortune_collector = FortuneCollector(
-            api_url=config["api_url"],
-            poll_interval=config.get("fortune_poll_interval", 3600)  # Default to 1 hour
-        )
-        fortune_collector.start()
-        
+        def signal_handler(signum, frame):
+            """Handle shutdown signals"""
+            print("\nShutting down...")
+            system_monitor.stop()
+            sys.exit(0)
+
+        # Set up signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
         # Keep the main thread alive
-        try:
-            while True:
-                input()  # Wait for Ctrl+C
-        except KeyboardInterrupt:
-            logger.info("Stopping collectors...")
-            collector.stop()
-            fortune_collector.stop()
-            
+        signal.pause()
+
     except Exception as e:
-        logger.error(f"Failed to start collection: {e}")
-        
+        print(f"Error in main: {e}")
+        sys.exit(1)
+
 if __name__ == "__main__":
     main()
