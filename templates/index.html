@@ -13,11 +13,17 @@
             border-bottom: 1px solid #ddd;
             margin-bottom: 20px;
         }
+        .location-text {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
     <div class="visit-banner">
-        You have visited this page {{ visit_count }} time{% if visit_count != 1 %}s{% endif %}! WHhy are you so obsessed with me? 🤨
+        <div>You have visited this page {{ visit_count }} time{% if visit_count != 1 %}s{% endif %}! WHhy are you so obsessed with me? 🤨</div>
+        <div class="location-text">Visiting from: {{ location }}</div>
     </div>
     <div class="container">
         <a href="/metrics" class="box">

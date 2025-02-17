@@ -5,6 +5,7 @@ import logging
 from lib.models.remote_metrics import RemoteMetricsStore
 from lib.metrics_service import MetricsService, ValidationError, get_db, Metrics
 from lib.models.visit_model import Visit
+from lib.ip_service import IPService
 from lib.constants import StatusCode
 import datetime
 from sqlalchemy import select
@@ -22,20 +23,10 @@ app = Flask(__name__)
 app.config['DEBUG'] = config.debug
 app.config['SECRET_KEY'] = config.server.secret_key
 
-# Initialize remote metrics store
-remote_metrics_store = RemoteMetricsStore()
-
 # Initialize services
+remote_metrics_store = RemoteMetricsStore()
 metrics_service = MetricsService()
-
-# Verify database setup
-with get_db() as db:
-    try:
-        # Try to query the Metrics table
-        result = db.query(Metrics).first()
-        logger.info("Metrics table exists and is accessible")
-    except Exception as e:
-        logger.error(f"Error accessing Metrics table: {e}")
+ip_service = IPService()
 
 def get_client_ip():
     """Get the client's IP address"""
@@ -66,9 +57,16 @@ def hello():
         db.commit()
         count = visit.count
     
+    # Get location info for the IP
+    location = ip_service.get_location(client_ip)
+    location_str = "Unknown Location"
+    if location:
+        location_str = f"{location['city']}, {location['region']}, {location['country']}"
+    
     return render_template(
         'index.html', 
         visit_count=count,
+        location=location_str,
         remote_metrics=remote_metrics_store.get_all_metrics()
     )
 
