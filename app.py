@@ -1,14 +1,13 @@
 import os
-from flask import Flask, jsonify, send_from_directory, render_template, request
+from flask import Flask, jsonify, send_from_directory, request, render_template
 from lib.config import Config
 import logging
-from lib.models.remote_metrics import RemoteMetricsStore
-from lib.metrics_service import MetricsService, ValidationError, get_db, Metrics
-from lib.models.visit_model import Visit
-from lib.ip_service import IPService
+from lib.models.country_commits_model import CountryCommits
+from lib.database import init_db, get_session
 from lib.constants import StatusCode
 import datetime
-from sqlalchemy import select
+from sqlalchemy import select, func, and_
+import sys
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,126 +22,142 @@ app = Flask(__name__)
 app.config['DEBUG'] = config.debug
 app.config['SECRET_KEY'] = config.server.secret_key
 
-# Initialize services
-remote_metrics_store = RemoteMetricsStore()
-metrics_service = MetricsService()
-ip_service = IPService()
-
-def get_client_ip():
-    """Get the client's IP address"""
-    if request.headers.getlist("X-Forwarded-For"):
-        # If behind a proxy, get real IP
-        return request.headers.getlist("X-Forwarded-For")[0]
-    return request.remote_addr
-
 @app.route("/")
-def hello():
-    """Render the main page with system metrics"""
-    # Get client IP
-    client_ip = get_client_ip()
-    
-    with get_db() as db:
-        # Get or create visit count for this IP
-        visit = db.query(Visit).filter_by(ip_address=client_ip).first()
-        
-        if not visit:
-            # First visit from this IP
-            visit = Visit(ip_address=client_ip)
-            db.add(visit)
-        else:
-            # Increment existing visit count
-            visit.count += 1
-            visit.last_visit = datetime.datetime.utcnow()
-        
-        db.commit()
-        count = visit.count
-    
-    # Get location info for the IP
-    location = ip_service.get_location(client_ip)
-    location_str = "Unknown Location"
-    if location:
-        location_str = f"{location['city']}, {location['region']}, {location['country']}"
-    
-    return render_template(
-        'index.html', 
-        visit_count=count,
-        location=location_str,
-        remote_metrics=remote_metrics_store.get_all_metrics()
-    )
+def index():
+    """Render the main dashboard"""
+    return render_template('index.html')
 
-@app.route("/metrics")
-def metrics_page():
-    """Display metrics dashboard"""
-    # Get latest metrics for all machines
-    remote_metrics = remote_metrics_store.get_all_metrics()
-    
-    return render_template(
-        "metrics.html",
-        remote_metrics=remote_metrics
-    )
+@app.route("/github")
+def github_dashboard():
+    """Render the GitHub stats dashboard"""
+    try:
+        with get_session() as db:
+            # Get latest stats for each country
+            subq = (
+                select(CountryCommits.country_code, 
+                      func.max(CountryCommits.timestamp).label('max_time'))
+                .group_by(CountryCommits.country_code)
+                .subquery()
+            )
+            
+            stats = (
+                db.query(CountryCommits)
+                .join(
+                    subq,
+                    and_(
+                        CountryCommits.country_code == subq.c.country_code,
+                        CountryCommits.timestamp == subq.c.max_time
+                    )
+                )
+                .all()
+            )
+            
+            return render_template(
+                'github_stats.html',
+                countries=[{
+                    'country_code': stat.country_code,
+                    'country_name': stat.country_name,
+                    'population': stat.population,
+                    'commit_count': stat.commit_count,
+                    'commits_per_capita': stat.commits_per_capita,
+                    'timestamp': stat.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')
+                } for stat in stats],
+                last_updated=stats[0].timestamp.strftime('%Y-%m-%d %H:%M:%S UTC') if stats else 'Never'
+            )
+            
+    except Exception as e:
+        logger.error(f"Error retrieving GitHub stats: {e}")
+        return render_template(
+            'github_stats.html',
+            countries=[],
+            last_updated='Error retrieving data',
+            error=str(e)
+        )
 
-@app.route("/metrics", methods=["POST"])
-def receive_metrics():
-    """Receive metrics from remote machines"""
+@app.route("/github_stats", methods=["POST"])
+def github_stats():
+    """Store GitHub stats data received from local app"""
     if not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), StatusCode.BAD_REQUEST
     
     try:
-        metrics_data = request.get_json()
+        data = request.get_json()
+        stats = data.get('stats')
         
-        # Store in the metrics database
-        result = metrics_service.create_metrics(metrics_data)
+        if not stats:
+            return jsonify({"error": "No stats data provided"}), StatusCode.BAD_REQUEST
         
-        # Also update the remote metrics store
-        machine_id = request.remote_addr
-        remote_metrics_store.update_metrics(machine_id, metrics_data)
+        with get_session() as db:
+            # Store each country's stats
+            for stat in stats:
+                country_stat = CountryCommits(
+                    country_code=stat['country_code'],
+                    country_name=stat['country_name'],
+                    population=stat['population'],
+                    commit_count=stat['commit_count'],
+                    commits_per_capita=stat['commits_per_capita'],
+                    timestamp=datetime.datetime.fromisoformat(stat['timestamp'])
+                )
+                db.add(country_stat)
+            db.commit()
         
-        # Return the created metrics with 201 status
-        return jsonify(result), StatusCode.CREATED
+        return jsonify({"message": "Stats stored successfully"}), StatusCode.OK
         
-    except ValidationError as e:
-        return jsonify({"error": str(e)}), StatusCode.BAD_REQUEST
     except Exception as e:
-        logger.error(f"Error processing metrics: {e}")
-        return jsonify({"error": str(e)}), StatusCode.INTERNAL_ERROR
+        logger.error(f"Error storing GitHub stats: {e}")
+        return jsonify({"error": str(e)}), StatusCode.INTERNAL_SERVER_ERROR
 
-@app.get("/metrics")
-def get_metrics():
-    """Get metrics with optional filtering"""
+@app.route("/github_stats", methods=["GET"])
+def get_github_stats():
+    """Get stored GitHub stats"""
     try:
-        device_id = request.args.get('device_id')
-        start_time = request.args.get('start_time')
-        end_time = request.args.get('end_time')
-        limit = request.args.get('limit', 1000, type=int)
-        
-        # Convert string timestamps to datetime if provided
-        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00')) if start_time else None
-        end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00')) if end_time else None
-        
-        result = metrics_service.get_metrics(
-            device_id=device_id,
-            start_time=start_dt,
-            end_time=end_dt,
-            limit=limit
-        )
-        return jsonify(result)
+        with get_session() as db:
+            # Get latest stats for each country
+            subq = (
+                select(CountryCommits.country_code, 
+                      func.max(CountryCommits.timestamp).label('max_time'))
+                .group_by(CountryCommits.country_code)
+                .subquery()
+            )
+            
+            stats = (
+                db.query(CountryCommits)
+                .join(
+                    subq,
+                    and_(
+                        CountryCommits.country_code == subq.c.country_code,
+                        CountryCommits.timestamp == subq.c.max_time
+                    )
+                )
+                .all()
+            )
+            
+            return jsonify([{
+                'country_code': stat.country_code,
+                'country_name': stat.country_name,
+                'population': stat.population,
+                'commit_count': stat.commit_count,
+                'commits_per_capita': stat.commits_per_capita,
+                'timestamp': stat.timestamp.isoformat()
+            } for stat in stats]), StatusCode.OK
+            
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        logger.error(f"Error retrieving GitHub stats: {e}")
+        return jsonify({"error": str(e)}), StatusCode.INTERNAL_SERVER_ERROR
 
-# Add this route to serve static files
 @app.route('/static/<path:path>')
 def send_static(path):
+    """Serve static files"""
     return send_from_directory('static', path)
 
 if __name__ == "__main__":
     try:
+        init_db()
         app.run(
             host=config.server.host,
             port=config.server.port,
             debug=config.debug
         )
     except Exception as e:
-        logger.error(f"Failed to start server: {e}")
-else:
-    # For WSGI servers
-    application = app
+        logger.error(f"Error starting server: {e}")
+        sys.exit(1)

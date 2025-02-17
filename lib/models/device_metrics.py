@@ -49,7 +49,7 @@ class DeviceMetrics:
     device_info: DeviceInfo
     metrics: List[Metric]
 
-    @classmethod
+    @classmethod #TODO, not sure that this should be referencing localhost
     def create_from_metrics(cls, metrics, device_id="local", hostname="localhost"):
         """Create a DeviceMetrics instance from SystemMonitor metrics"""
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

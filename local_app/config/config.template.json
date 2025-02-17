@@ -1,0 +1,16 @@
+{
+    "api_url": "http://localhost:5000",
+    "logging": {
+        "level": "INFO",
+        "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    },
+    "storage": {
+        "enable_local_backup": true,
+        "cleanup_after_days": 7
+    },
+    "system_poll_interval": 60,
+    "github": {
+        "github_token": "",
+        "poll_interval": 3600
+    }
+}
