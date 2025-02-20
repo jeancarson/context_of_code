@@ -1,0 +1,52 @@
+CREATE TABLE "Metrics" (
+    "timestamp" DATETIME NOT NULL,
+    "cpu_percent" FLOAT NOT NULL,
+    "memory_percent" FLOAT NOT NULL,
+    "memory_available_gb" FLOAT NOT NULL,
+    "memory_total_gb" FLOAT NOT NULL,
+    "device_id" VARCHAR(100) NOT NULL,
+    "id" INTEGER,
+    PRIMARY KEY("id")
+);
+
+CREATE TABLE "countries" (
+    "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "country_name" TEXT NOT NULL,
+    "capital_city" TEXT NOT NULL,
+    "currency_id" INTEGER NOT NULL,               -- link to currencies table
+    FOREIGN KEY ("currency_id") REFERENCES currencies(id)
+);
+
+CREATE TABLE "capital_temperatures" (
+    "id" VARCHAR(36) NOT NULL,
+    "country_id" INTEGER NOT NULL,           
+    "temperature" FLOAT NOT NULL,
+    "timestamp" DATETIME NOT NULL,
+    PRIMARY KEY("id"),
+    FOREIGN KEY (country_id) REFERENCES countries(id)   -- references the country instead of just the city
+);
+
+CREATE INDEX idx_country_id ON capital_temperatures(country_id);                  
+CREATE INDEX idx_country_timestamp ON capital_temperatures(country_id, timestamp); 
+
+CREATE TABLE "currencies" (
+    "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+    "currency_code" TEXT NOT NULL UNIQUE,   -- e.g., USD, EUR
+    "currency_name" TEXT NOT NULL           -- e.g., US Dollar, Euro
+);
+
+CREATE TABLE "exchange_rates" (
+    "id" VARCHAR(36) NOT NULL,
+    "from_currency" INTEGER NOT NULL,      -- references currency_code in currencies
+    "to_currency" INTEGER NOT NULL,        -- references currency_code in currencies
+    "rate" FLOAT NOT NULL,
+    "timestamp" DATETIME NOT NULL,
+    PRIMARY KEY("id"),
+    FOREIGN KEY (from_currency) REFERENCES currencies(id),
+    FOREIGN KEY (to_currency) REFERENCES currencies(id)
+);
+
+-- Indexes for faster queries
+CREATE INDEX idx_from_currency ON exchange_rates(from_currency);                -- Index for from_currency
+CREATE INDEX idx_to_currency ON exchange_rates(to_currency);                    -- Index for to_currency
+CREATE INDEX idx_currency_timestamp ON exchange_rates(from_currency, to_currency, timestamp); -- Composite index for queries by currency and date
