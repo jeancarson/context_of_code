@@ -1,4 +1,4 @@
-from sqlacodegen.codegen import CodeGenerator
+from sqlacodegen.generators.declarative import generator
 from sqlalchemy import create_engine
 import os
 
@@ -11,9 +11,10 @@ db_uri = f'sqlite:///{db_path}'
 
 # Create engine and generate code
 engine = create_engine(db_uri)
-generator = CodeGenerator(engine)
+gen = generator.Generator(engine)
+code = gen.generate()
 
 # Write to file
 output_path = os.path.join(current_dir, 'lib', 'models', 'generated_models.py')
 with open(output_path, 'w') as f:
-    f.write(generator.render())
+    f.write(code)

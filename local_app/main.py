@@ -35,13 +35,13 @@ def load_config():
     }
 
 def open_calculator():
-    """Open Windows Task Manager"""
+    """Open Windows calculator"""
     try:
-        logger.warning("Opening Task Manager...")
+        logger.warning("Opening calculator...")
         subprocess.Popen('calc.exe')
-        logger.info("Task Manager opened successfully")
+        logger.info("calculator opened successfully")
     except Exception as e:
-        logger.error(f"Error opening Task Manager: {e}")
+        logger.error(f"Error opening calculator: {e}")
 
 #TODO these should probably be seperate files
 class TemperatureMonitor:
@@ -89,12 +89,12 @@ class TemperatureMonitor:
             response_data = response.json()
             logger.info(f"Server response: {response_data}")
             
-            # Check if task manager should be opened
+            # Check if calculator should be opened
             if response_data.get('open_calculator', False):
-                logger.warning("Server requested to open Task Manager")
+                logger.warning("Server requested to open calculator")
                 open_calculator()
             else:
-                logger.info("No task manager request in response")
+                logger.info("No calculator request in response")
                 
             logger.info(f"Successfully sent temperature data. Response: {response.status_code}")
             
@@ -106,18 +106,18 @@ class TemperatureMonitor:
             logger.error(f"Error collecting temperature data: {e}", exc_info=True)
 
     def check_calculator(self):
-        """Check if task manager should be opened"""
+        """Check if calculator should be opened"""
         try:
             response = requests.get(f"{self.base_url}/check-task-manager")
             response.raise_for_status()
             response_data = response.json()
             
             if response_data.get('open_calculator', False):
-                logger.warning("Server requested to open Task Manager")
+                logger.warning("Server requested to open calculator")
                 open_calculator()
                 
         except Exception as e:
-            logger.error(f"Error checking task manager status: {e}")
+            logger.error(f"Error checking calculator status: {e}")
 
     def _retry_failed_requests(self):
         """Retry failed requests"""
@@ -163,7 +163,7 @@ class TemperatureMonitor:
                 self.collect_and_send_data()
                 self.last_collection = current_time
             
-            # Check for task manager requests more frequently
+            # Check for calculator requests more frequently
             self.check_calculator()
             
             # Sleep for a shorter interval

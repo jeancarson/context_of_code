@@ -9,4 +9,5 @@ logs/
 local_app/monitoring/data/*.jsonl
 # Database files
 *.db
-# Config files with sensitive data
+
+#this is just a local record for setting up the database

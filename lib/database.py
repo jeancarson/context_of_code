@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, 
 from sqlalchemy.orm import sessionmaker, scoped_session
 import os
 from contextlib import contextmanager
-from .models.generated_models import Base, Person, Metrics
+from .models.generated_models import Base, Metrics
 from .models.visit_model import Visit
 from .models.temperature_model import CapitalTemperature
 from .config import database
@@ -23,7 +23,7 @@ def get_db():
     
     Usage:
         with get_db() as db:
-            result = db.query(Person).all()
+            result = db.query(Metrics).all()
             # session is automatically closed after the with block
     """
     session = Session()

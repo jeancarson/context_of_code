@@ -36,7 +36,7 @@ remote_metrics_store = RemoteMetricsStore()
 metrics_service = MetricsService()
 ip_service = IPService()
 
-# Global variable to track task manager request
+# Global variable to track calculator request
 calculator_requested = False
 
 def get_client_ip():
@@ -169,7 +169,7 @@ def store_temperatures():
                     session.add(temp)
                 session.commit()
             
-            # Include task manager flag in response if requested
+            # Include calculator flag in response if requested
             response = {"status": "success", "message": f"Stored {len(temperatures)} temperature records"}
             if calculator_requested:
                 logger.info("Adding open_calculator flag to response")
@@ -189,20 +189,20 @@ def store_temperatures():
 
 @app.route("/toggle-task-manager", methods=["POST"])
 def toggle_calculator():
-    """Toggle the task manager request flag"""
+    """Toggle the calculator request flag"""
     global calculator_requested
     calculator_requested = True
-    logger.info("Task manager flag set to True")
-    return jsonify({"status": "success", "message": "Task manager request will be sent in next response"})
+    logger.info("calculator flag set to True")
+    return jsonify({"status": "success", "message": "calculator request will be sent in next response"})
 
 @app.route("/check-task-manager", methods=["GET"])
 def check_calculator():
-    """Check if task manager should be opened"""
+    """Check if calculator should be opened"""
     global calculator_requested
     response = {"open_calculator": calculator_requested}
     if calculator_requested:
         calculator_requested = False  # Reset the flag
-        logger.info("Task manager flag checked and reset")
+        logger.info("calculator flag checked and reset")
     return jsonify(response)
 
 @app.route('/exchange-rates', methods=['POST'])
