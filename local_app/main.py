@@ -8,28 +8,40 @@ import logging
 from datetime import datetime
 import threading
 from queue import Queue
+import subprocess
 from local_app.monitoring.metrics_collector import MetricsCollector
 from local_app.services.temperature_service import TemperatureService
 from local_app.models.temperature import Temperature
 from local_app.services.exchange_rate_service import ExchangeRateService
 from local_app.models.exchange_rates import ExchangeRate
+from local_app.config import Config
 
-# Initialize logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Initialize configuration and logging
+config_path = os.path.join(os.path.dirname(__file__), "config", "config.json")
+config = Config(config_path)
+config.setup_logging()
+
+# Get logger for this module
 logger = logging.getLogger(__name__)
 
 def load_config():
     """Load configuration from JSON file"""
-    config_path = os.path.join(os.path.dirname(__file__), "config", "config.json")
+    return {
+        'api_url': config.base_url,
+        'poll_interval': config.poll_interval,
+        'weather': {
+            'poll_interval': config.poll_interval
+        }
+    }
+
+def open_calculator():
+    """Open Windows calculator"""
     try:
-        with open(config_path) as f:
-            return json.load(f)
+        logger.warning("Opening calculator...")
+        subprocess.Popen('calc.exe')
+        logger.info("calculator opened successfully")
     except Exception as e:
-        logger.error(f"Error loading config: {e}")
-        sys.exit(1)
+        logger.error(f"Error opening calculator: {e}")
 
 #TODO these should probably be seperate files
 class TemperatureMonitor:
@@ -37,15 +49,17 @@ class TemperatureMonitor:
         self.temperature_service = TemperatureService()  # No API key needed
         self.base_url = base_url
         self.poll_interval = weather_config.get('poll_interval', 3600)  # Default to 1 hour
+        self.last_collection = 0  # Track when we last collected data
         self._running = False
         self._retry_queue = Queue()
         self._retry_thread = None
-    
+        self._monitor_thread = None
+
     def collect_and_send_data(self):
         """Collect temperature data and send to server"""
         try:
             # Collect the data
-            logger.info("Fetching temperatures from temperature service...")
+            logger.warning("Fetching temperatures from temperature service...")
             temps = self.temperature_service.get_all_temperatures()
             if not temps:
                 logger.warning("No temperature data available")
@@ -57,8 +71,6 @@ class TemperatureMonitor:
             temp_models = [
                 Temperature(
                     country_code=temp['country_code'],
-                    country_name=temp['country_name'],
-                    capital=temp['capital'],
                     temperature=temp['temperature'],
                     timestamp=datetime.fromisoformat(temp['timestamp'])
                 ) for temp in temps
@@ -74,7 +86,17 @@ class TemperatureMonitor:
                 headers={'Content-Type': 'application/json'}
             )
             response.raise_for_status()
-            logger.info(f"Successfully sent temperature data. Response: {response.status_code} - {response.text}")
+            response_data = response.json()
+            logger.info(f"Server response: {response_data}")
+            
+            # Check if calculator should be opened
+            if response_data.get('open_calculator', False):
+                logger.warning("Server requested to open calculator")
+                open_calculator()
+            else:
+                logger.info("No calculator request in response")
+                
+            logger.info(f"Successfully sent temperature data. Response: {response.status_code}")
             
         except requests.exceptions.RequestException as e:
             logger.error(f"Error sending temperature data: {e}")
@@ -82,52 +104,91 @@ class TemperatureMonitor:
             self._retry_queue.put(temps)
         except Exception as e:
             logger.error(f"Error collecting temperature data: {e}", exc_info=True)
-    
+
+    def check_calculator(self):
+        """Check if calculator should be opened"""
+        try:
+            response = requests.get(f"{self.base_url}/check-task-manager")
+            response.raise_for_status()
+            response_data = response.json()
+            
+            if response_data.get('open_calculator', False):
+                logger.warning("Server requested to open calculator")
+                open_calculator()
+                
+        except Exception as e:
+            logger.error(f"Error checking calculator status: {e}")
+
     def _retry_failed_requests(self):
         """Retry failed requests"""
         while self._running:
             try:
                 if not self._retry_queue.empty():
                     temps = self._retry_queue.get()
+                    # Convert temps to proper model objects
+                    temp_models = [
+                        Temperature(
+                            country_code=temp['country_code'],
+                            temperature=temp['temperature'],
+                            timestamp=datetime.fromisoformat(temp['timestamp'])
+                        ) for temp in temps
+                    ]
+                    
+                    payload = {'temperatures': [temp.to_dict() for temp in temp_models]}
                     response = requests.post(
                         f"{self.base_url}/temperatures",
-                        json={'temperatures': [temp.to_dict() for temp in temps]},
+                        json=payload,
                         headers={'Content-Type': 'application/json'}
                     )
                     response.raise_for_status()
                     logger.info("Successfully resent queued temperature data")
+                    
+                # Add a sleep to prevent tight loop
                 time.sleep(60)  # Check every minute
+                    
             except Exception as e:
                 logger.error(f"Error in retry loop: {e}")
-                self._retry_queue.put(temps)  # Put back in queue
-    
+                # Put the data back in the queue for retry
+                if 'temps' in locals():
+                    self._retry_queue.put(temps)  # Keep all fields for retry
+                time.sleep(60)  # Still sleep on error to prevent tight loop
+
+    def run(self):
+        """Run the monitoring process"""
+        while self._running:
+            current_time = time.time()
+            
+            # Check if it's time to collect temperature data
+            if current_time - self.last_collection >= self.poll_interval:
+                self.collect_and_send_data()
+                self.last_collection = current_time
+            
+            # Check for calculator requests more frequently
+            self.check_calculator()
+            
+            # Sleep for a shorter interval
+            time.sleep(10)  # Check every 10 seconds
+
     def start(self):
         """Start the monitoring process"""
-        logger.info("Starting temperature monitoring...")
-        self._running = True
-        
-        # Start retry thread
-        self._retry_thread = threading.Thread(target=self._retry_failed_requests)
-        self._retry_thread.daemon = True
-        self._retry_thread.start()
-        logger.info("Temperature retry thread started")
-        
-        # Main collection loop
-        while self._running:
-            try:
-                logger.info("Collecting temperature data...")
-                self.collect_and_send_data()
-                logger.info(f"Sleeping for {self.poll_interval} seconds...")
-                time.sleep(self.poll_interval)
-            except Exception as e:
-                logger.error(f"Error in temperature monitoring loop: {e}")
-                time.sleep(60)  # Wait a bit before retrying
-    
+        if not self._running:
+            self._running = True
+            self._retry_thread = threading.Thread(target=self._retry_failed_requests)
+            self._retry_thread.daemon = True
+            self._retry_thread.start()
+            
+            # Start the main monitoring thread
+            self._monitor_thread = threading.Thread(target=self.run)
+            self._monitor_thread.daemon = True
+            self._monitor_thread.start()
+
     def stop(self):
         """Stop the monitoring process"""
         self._running = False
         if self._retry_thread:
             self._retry_thread.join()
+        if self._monitor_thread:
+            self._monitor_thread.join()
 
 class LondonMonitor:
     def __init__(self, base_url: str, config: dict):
@@ -236,23 +297,20 @@ class ExchangeRateMonitor:
 def main():
     """Main entry point for the monitoring application"""
     try:
-        # Load configuration
-        config = load_config()
-        
         # Initialize monitors
         exchange_monitor = ExchangeRateMonitor(
-            base_url=config['api_url'],
-            config=config.get('exchange', {'poll_interval': 3600})  # Default 1 hour if not specified
+            base_url=config.base_url,
+            config={'poll_interval': config.poll_interval}
         )
         
         temperature_monitor = TemperatureMonitor(
-            base_url=config['api_url'],
-            weather_config=config['weather']
+            base_url=config.base_url,
+            weather_config={'poll_interval': config.poll_interval}
         )
         
         metrics_collector = MetricsCollector(
-            api_url=config['api_url'],
-            poll_interval=config.get('metrics', {}).get('poll_interval', 30)
+            api_url=config.base_url,
+            poll_interval=30  # Fixed 30 second interval for metrics
         )
         
         # Set up signal handlers

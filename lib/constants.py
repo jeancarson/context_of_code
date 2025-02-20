@@ -14,13 +14,7 @@ class StatusCode(int, Enum):
     NOT_FOUND = 404
     INTERNAL_SERVER_ERROR = 500
 
-class PersonField(str, Enum):
-    ID = "id"
-    NAME = "name"
-    DOB = "dob"
-
 class ErrorMessage(str, Enum):
-    PERSON_NOT_FOUND = "Person not found"
     INVALID_CONTENT_TYPE = "Content-Type must be application/json"
     MISSING_REQUIRED_FIELDS = "Missing required fields"
     MISSING_UPDATE_FIELDS = "At least one field (name or dob) is required"
