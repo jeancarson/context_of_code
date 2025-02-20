@@ -1,5 +1,4 @@
 # Add this if you haven't already
-venv/
 .venv/
 __pycache__/
 *.pyc
@@ -7,7 +6,3 @@ logs/
 *.log 
 # Local metrics storage
 local_app/monitoring/data/*.jsonl
-# Database files
-*.db
-
-#this is just a local record for setting up the database
