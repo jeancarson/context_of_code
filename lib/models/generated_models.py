@@ -26,13 +26,6 @@ class Metrics(Base):
     cpu_temp: Mapped[Optional[float]] = mapped_column(Float)
 
 
-class Person(Base):
-    __tablename__ = 'Person'
-
-    Name: Mapped[Optional[str]] = mapped_column(Text)
-    DOB: Mapped[Optional[str]] = mapped_column(Text)
-    ROWID: Mapped[Optional[int]] = mapped_column(Integer, primary_key=True)
-
 
 class ExchangeRates(Base):
     __tablename__ = 'exchange_rates'

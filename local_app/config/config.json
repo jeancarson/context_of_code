@@ -1,5 +1,5 @@
 {
-    "base_url": "http://localhost:5000",
+    "base_url": "http://jeancarson.pythonanywhere.com",
     "poll_interval": 3600,
     "logging": {
         "console": {

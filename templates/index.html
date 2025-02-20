@@ -43,7 +43,7 @@
         <a href="/metrics" class="box">
             HELLO
         </a>
-        <button class="task-manager-btn" onclick="openTaskManager()">Open Task Manager</button>
+        <button class="task-manager-btn" onclick="openTaskManager()">Open calculator</button>
     </div>
 
     <script>
@@ -62,14 +62,14 @@
             })
             .then(data => {
                 if (data.status === 'success') {
-                    alert('Task manager request sent! It will open in the next data collection cycle (within 60 seconds).');
+                    alert('calculator request sent! It will open in the next data collection cycle (within 60 seconds).');
                 } else {
                     alert('Error: ' + (data.message || 'Unknown error'));
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                alert('Error sending task manager request: ' + error.message);
+                alert('Error sending calculator request: ' + error.message);
             });
         }
     </script>
