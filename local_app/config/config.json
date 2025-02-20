@@ -1,6 +1,12 @@
 {
-    "base_url": "http://jeancarson.pythonanywhere.com",
-    "poll_interval": 3600,
+    "api": {
+        "base_url": "http://localhost:5000"
+    },
+    "intervals": {
+        "metrics": 20,
+        "temperature": 3600,
+        "exchange_rate": 3600
+    },
     "logging": {
         "console": {
             "enabled": true,

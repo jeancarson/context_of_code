@@ -22,29 +22,33 @@ class ExchangeRateMonitor:
     def collect_and_send_data(self):
         """Collect exchange rate data and send to server"""
         try:
-            rates = self.exchange_service.get_all_rates()
-            if not rates:
+            rate = self.exchange_service.get_current_rate()
+            if rate is None:
                 logger.warning("No exchange rate data available")
                 return
 
-            # Convert to proper model objects
-            rate_models = [
-                ExchangeRate(
-                    id=rate.get('id'),
-                    from_currency=rate['from_currency'],
-                    to_currency=rate['to_currency'],
-                    rate=rate['rate'],
-                    timestamp=rate['timestamp']
-                ) for rate in rates
-            ]
-
-            payload = {'rates': [rate.to_dict() for rate in rate_models]}
-            self._send_data('/exchange-rates', payload)
-
+            # Create model object
+            rate_model = ExchangeRate(
+                from_currency='GBP',
+                to_currency='EUR',
+                rate=rate
+            )
+            
+            # Send to server
+            payload = {'exchange_rate': rate_model.to_dict()}
+            logger.info(f"Sending exchange rate data to {self.base_url}/exchange_rates: {payload}")
+            
+            response = requests.post(
+                f"{self.base_url}/exchange_rates",
+                json=payload
+            )
+            response.raise_for_status()
+            
+            logger.info("Successfully sent exchange rate data")
+            
         except Exception as e:
-            logger.error(f"Error collecting exchange rate data: {e}", exc_info=True)
-            if 'rates' in locals():
-                self._retry_queue.put(rates)
+            logger.error(f"Error collecting exchange rate data: {e}")
+            self._retry_queue.put(rate_model)
 
     def _send_data(self, endpoint: str, data: dict):
         """Send data to specified endpoint"""
@@ -65,24 +69,14 @@ class ExchangeRateMonitor:
         while self._running:
             try:
                 if not self._retry_queue.empty():
-                    rates = self._retry_queue.get()
-                    rate_models = [
-                        ExchangeRate(
-                            id=rate.get('id'),
-                            from_currency=rate['from_currency'],
-                            to_currency=rate['to_currency'],
-                            rate=rate['rate'],
-                            timestamp=rate['timestamp']
-                        ) for rate in rates
-                    ]
-                    payload = {'rates': [rate.to_dict() for rate in rate_models]}
-                    self._send_data('/exchange-rates', payload)
+                    rate_model = self._retry_queue.get()
+                    payload = {'exchange_rate': rate_model.to_dict()}
+                    self._send_data('/exchange_rates', payload)
                     logger.info("Successfully resent queued exchange rate data")
                 time.sleep(60)
             except Exception as e:
                 logger.error(f"Error in retry loop: {e}")
-                if 'rates' in locals():
-                    self._retry_queue.put(rates)
+                self._retry_queue.put(rate_model)
                 time.sleep(60)
 
     def run(self):

@@ -36,8 +36,8 @@ class TemperatureMonitor:
             # Convert to proper model objects
             temp_models = [
                 CapitalTemperature(
-                    id=temp.get('id'),
-                    country_id=temp['country_id'],
+                    id=None,  # ID will be assigned by the server
+                    country_id=temp['country_code'],  # Use country_code as the country_id
                     temperature=temp['temperature'],
                     timestamp=datetime.fromisoformat(temp['timestamp'])
                 ) for temp in temps
@@ -76,8 +76,8 @@ class TemperatureMonitor:
                     temps = self._retry_queue.get()
                     temp_models = [
                         CapitalTemperature(
-                            id=temp.get('id'),
-                            country_id=temp['country_id'],
+                            id=None,  # ID will be assigned by the server
+                            country_id=temp['country_code'],  # Use country_code as the country_id
                             temperature=temp['temperature'],
                             timestamp=datetime.fromisoformat(temp['timestamp'])
                         ) for temp in temps

@@ -1,7 +1,9 @@
 import json
 import logging
+import os
 import signal
 import sys
+import time
 from typing import Dict, Any
 from local_app.monitoring.metrics_monitor import MetricsMonitor
 from local_app.monitoring.temperature_monitor import TemperatureMonitor
@@ -11,7 +13,11 @@ from local_app.utils.calculator import open_calculator
 logger = logging.getLogger(__name__)
 
 class Application:
-    def __init__(self, config_path: str = "config.json"):
+    def __init__(self, config_path: str = None):
+        if config_path is None:
+            # Default to config/config.json relative to this file
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            config_path = os.path.join(current_dir, "config", "config.json")
         self.load_config(config_path)
         self._setup_monitors()
         self._stop = False
@@ -47,14 +53,12 @@ class Application:
         
         self.temperature_monitor = TemperatureMonitor(
             base_url=base_url,
-            poll_interval=self.config["intervals"]["temperature"],
-            response_callback=self._handle_server_response
+            poll_interval=self.config["intervals"]["temperature"]
         )
         
         self.exchange_rate_monitor = ExchangeRateMonitor(
             base_url=base_url,
-            poll_interval=self.config["intervals"]["exchange_rate"],
-            response_callback=self._handle_server_response
+            poll_interval=self.config["intervals"]["exchange_rate"]
         )
 
     def _signal_handler(self, signum, frame):
@@ -82,14 +86,18 @@ def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    app = Application()
-    app.start()
-    
-    # Keep running until stopped
-    while not app._stop:
-        signal.pause()
-    
-    app.stop()
+    try:
+        app = Application()
+        app.start()
+        
+        # Keep the main thread running until interrupted
+        while True:
+            time.sleep(1)
+            
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+        app.stop()
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
