@@ -242,15 +242,14 @@ def add_exchange_rate():
         return jsonify({"error": str(e)}), StatusCode.INTERNAL_SERVER_ERROR
 
 
-@app.route("/london")
-def london_dashboard():
-    """Display London dashboard with temperature and exchange rate"""
-    logger.info("Loading London dashboard")
+@app.route("/countries")
+def country_dashboard():
+    """Display country dashboard with temperature and exchange rate"""
+    logger.info("Loading country dashboard")
     try:
         with get_session() as db:
-            # Get latest temperature for London
+            # Get latest temperature for each country
             latest_temp = db.query(CapitalTemperature)\
-                .filter(CapitalTemperature.country_code == 'GB')\
                 .order_by(desc(CapitalTemperature.timestamp))\
                 .first()
 
@@ -269,13 +268,13 @@ def london_dashboard():
                 last_updated = latest_rate.timestamp
 
             return render_template(
-                'london.html',
+                'country_info.html',
                 temperature=latest_temp.temperature if latest_temp else 'N/A',
                 exchange_rate=f"{latest_rate.rate:.6f}" if latest_rate else 'N/A',
                 last_updated=last_updated.strftime('%Y-%m-%d %H:%M:%S UTC') if last_updated else 'Never'
             )
     except Exception as e:
-        logger.error(f"Error loading London dashboard: {e}", exc_info=True)
+        logger.error(f"Error loading country dashboard: {e}", exc_info=True)
         return jsonify({"error": "Failed to load dashboard"}), StatusCode.INTERNAL_SERVER_ERROR
 
 @app.route('/static/<path:path>')
