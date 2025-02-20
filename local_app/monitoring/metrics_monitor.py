@@ -1,31 +1,33 @@
-import time
 import logging
-import requests
-from typing import Optional, Dict, Any
-from datetime import datetime
-import json
 import threading
-from queue import Queue
+import time
+import json
 import os
-from local_app.monitoring.system_monitor import SystemMonitor
-from local_app.models.system_metrics import SystemMetrics
-from lib.constants import StatusCode
+from queue import Queue
+from typing import Optional, Callable
+import requests
+from local_app.services.system_service import SystemService
+from local_app.models.metrics import Metrics
 
 logger = logging.getLogger(__name__)
 
-class MetricsCollector:
-    def __init__(self, api_url: str, poll_interval: int = 30):
-        """Initialize the metrics collector
+class MetricsMonitor:
+    """Monitor for collecting and sending system metrics"""
+    
+    def __init__(self, base_url: str, poll_interval: int = 30, response_callback: Optional[Callable[[dict], None]] = None):
+        """Initialize the metrics monitor
         
         Args:
-            api_url: URL of the metrics API
+            base_url: URL of the metrics API
             poll_interval: How often to collect metrics (in seconds)
+            response_callback: Optional callback for handling server responses
         """
-        self.api_url = api_url
+        self.api_url = base_url
         self.poll_interval = poll_interval
-        self.system_monitor = SystemMonitor()
+        self.system_service = SystemService()
+        self.response_callback = response_callback
         self._stop_event = threading.Event()
-        self._metrics_queue: Queue = Queue()
+        self._metrics_queue = Queue()
         self._setup_storage()
         
     def _setup_storage(self):
@@ -33,74 +35,51 @@ class MetricsCollector:
         self.storage_dir = os.path.join(os.path.dirname(__file__), "data")
         os.makedirs(self.storage_dir, exist_ok=True)
         
-    def _store_metrics(self, metrics: SystemMetrics):
+    def _store_metrics(self, metrics: Metrics):
         """Store metrics locally"""
         filename = os.path.join(
             self.storage_dir,
             f"metrics_{metrics.timestamp.strftime('%Y%m%d')}.jsonl"
         )
         with open(filename, "a") as f:
-            f.write(metrics.json() + "\n")
+            json.dump(metrics.to_dict(), f)
+            f.write("\n")
             
-    def _send_metrics(self, metrics: SystemMetrics) -> bool:
-        """Send metrics to the API
-        
-        Returns:
-            bool: True if successful, False otherwise
-        """
+    def _send_metrics(self, metrics: Metrics) -> bool:
+        """Send metrics to the API"""
         try:
-            headers = {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
-            
-            # Convert to dict and ensure datetime is serialized
-            metrics_dict = json.loads(metrics.json())
+            metrics_dict = metrics.to_dict()
             logger.info(f"Sending metrics to API: {metrics_dict}")
             
             response = requests.post(
                 f"{self.api_url}/metrics",
                 json=metrics_dict,
-                headers=headers,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
                 verify=True
             )
             
-            logger.info(f"API Response: {response.status_code} - {response.text}")
-            
-            if response.status_code == StatusCode.CREATED:
+            if response.status_code == 201:  # Created
                 logger.info(f"Successfully sent metrics to {self.api_url}")
-                response_data = response.json()
-                
-                # Handle any server commands or config updates
-                if "command" in response_data:
-                    logger.info(f"Received command: {response_data['command']}")
-                    # Handle command here if needed
-                    
-                if "config" in response_data:
-                    logger.info(f"Received config update: {response_data['config']}")
-                    # Update config here if needed
-                    
+                if self.response_callback:
+                    self.response_callback(response.json())
                 return True
             else:
-                logger.error(f"Failed to send metrics. Status: {response.status_code}, Response: {response.text}")
+                logger.error(f"Failed to send metrics. Status: {response.status_code}")
                 return False
                 
-        except requests.exceptions.SSLError as e:
-            logger.error(f"SSL Error when sending metrics: {e}")
-            return False
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"Connection error when sending metrics: {e}")
-            return False
         except Exception as e:
             logger.error(f"Failed to send metrics: {e}")
             return False
             
-    def _collect_metrics(self):
+    def _collect_and_send(self):
         """Collect and process metrics"""
         while not self._stop_event.is_set():
             try:
                 # Get metrics
-                metrics = self.system_monitor.get_metrics()
+                metrics = self.system_service.get_metrics()
                 
                 # Store locally
                 self._store_metrics(metrics)
@@ -115,7 +94,7 @@ class MetricsCollector:
                 
             time.sleep(self.poll_interval)
             
-    def _retry_failed_metrics(self):
+    def _retry_failed(self):
         """Retry sending failed metrics"""
         while not self._stop_event.is_set():
             try:
@@ -137,14 +116,14 @@ class MetricsCollector:
         
         # Start collection thread
         self._collection_thread = threading.Thread(
-            target=self._collect_metrics,
+            target=self._collect_and_send,
             daemon=True
         )
         self._collection_thread.start()
         
         # Start retry thread
         self._retry_thread = threading.Thread(
-            target=self._retry_failed_metrics,
+            target=self._retry_failed,
             daemon=True
         )
         self._retry_thread.start()
