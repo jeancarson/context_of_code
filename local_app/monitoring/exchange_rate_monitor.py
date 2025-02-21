@@ -10,8 +10,8 @@ from local_app.models.exchange_rates import ExchangeRate
 logger = logging.getLogger(__name__)
 
 class ExchangeRateMonitor:
-    def __init__(self, base_url: str, poll_interval: int = 3600):
-        self.exchange_service = ExchangeRateService()
+    def __init__(self, base_url: str, config_path: str = 'local_app/config/config.json', poll_interval: int = 3600):
+        self.exchange_service = ExchangeRateService(config_path)
         self.base_url = base_url
         self.poll_interval = poll_interval
         self._running = False
@@ -22,33 +22,38 @@ class ExchangeRateMonitor:
     def collect_and_send_data(self):
         """Collect exchange rate data and send to server"""
         try:
-            rate = self.exchange_service.get_current_rate()
-            if rate is None:
+            rates = self.exchange_service.get_all_rates()
+            if not rates:
                 logger.warning("No exchange rate data available")
                 return
 
-            # Create model object
-            rate_model = ExchangeRate(
-                from_currency='GBP',
-                to_currency='EUR',
-                rate=rate
-            )
-            
-            # Send to server
-            payload = {'exchange_rate': rate_model.to_dict()}
-            logger.info(f"Sending exchange rate data to {self.base_url}/exchange_rates: {payload}")
-            
-            response = requests.post(
-                f"{self.base_url}/exchange_rates",
-                json=payload
-            )
-            response.raise_for_status()
-            
-            logger.info("Successfully sent exchange rate data")
+            # Send each rate to server
+            for rate_data in rates:
+                # Create model object
+                rate_model = ExchangeRate(
+                    from_currency=rate_data['from_currency'],
+                    to_currency=rate_data['to_currency'],
+                    rate=rate_data['rate'],
+                    timestamp=rate_data['timestamp']
+                )
+                
+                # Send to server
+                payload = {'exchange_rate': rate_model.to_dict()}
+                logger.info(f"Sending exchange rate data to {self.base_url}/exchange_rates: {payload}")
+                
+                try:
+                    response = requests.post(
+                        f"{self.base_url}/exchange_rates",
+                        json=payload
+                    )
+                    response.raise_for_status()
+                    logger.info(f"Successfully sent exchange rate data for {rate_data['from_currency']}")
+                except Exception as e:
+                    logger.error(f"Error sending exchange rate data: {e}")
+                    self._retry_queue.put(rate_model)
             
         except Exception as e:
             logger.error(f"Error collecting exchange rate data: {e}")
-            self._retry_queue.put(rate_model)
 
     def _send_data(self, endpoint: str, data: dict):
         """Send data to specified endpoint"""

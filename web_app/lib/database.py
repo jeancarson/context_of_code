@@ -10,6 +10,10 @@ import logging
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Create engine and session
+logger = logging.getLogger(__name__)
+logger.info(f"Database config: {database.__dict__}")
+logger.info(f"Database path: {database.db_path}")
+logger.info(f"Using database URL: {database.database_url}")
 engine = create_engine(database.database_url)
 
 # Create a scoped session factory

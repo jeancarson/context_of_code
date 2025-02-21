@@ -1,25 +1,114 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>London Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <title>Country Information Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background-color: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .timestamp {
+            font-size: 0.8em;
+            color: #666;
+        }
+        .na {
+            color: #999;
+            font-style: italic;
+        }
+        .value {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        .metrics {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        .no-data {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-style: italic;
+        }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <div class="card">
-            <h2>London Statistics</h2>
-            <div class="stat-grid">
-                <div class="stat-item">
-                    <h3>Temperature</h3>
-                    <p>{{ temperature }}°C</p>
-                </div>
-                <div class="stat-item">
-                    <h3>GBP/EUR Rate</h3>
-                    <p>€{{ exchange_rate }}</p>
-                </div>
-            </div>
-            <div class="timestamp">Last updated: {{ last_updated }}</div>
-        </div>
+    <h1>Country Information Dashboard</h1>
+    
+    {% if country %}
+    <!-- Country Information -->
+    <table>
+        <tr>
+            <th>Country</th>
+            <th>Capital</th>
+            <th>Currency</th>
+            <th>Temperature</th>
+            <th>Exchange Rate (EUR)</th>
+        </tr>
+        <tr>
+            <td>{{ country.country_name }}</td>
+            <td>{{ country.capital_city }}</td>
+            <td>{{ country.currency.currency_code }}</td>
+            <td>
+                {% if latest_temperature %}
+                <div class="value">{{ "%.1f"|format(latest_temperature.temperature) }}°C</div>
+                <div class="timestamp">Updated: {{ latest_temperature.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+                {% else %}
+                <span class="na">N/A</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if latest_exchange_rate %}
+                <div class="value">{{ "%.4f"|format(latest_exchange_rate.rate) }}</div>
+                <div class="timestamp">Updated: {{ latest_exchange_rate.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+                {% else %}
+                <span class="na">N/A</span>
+                {% endif %}
+            </td>
+        </tr>
+    </table>
+    {% else %}
+    <div class="no-data">
+        <p>No country data available. Please make sure countries are configured in the system.</p>
     </div>
+    {% endif %}
+
+    <!-- System Metrics -->
+    {% if latest_metrics %}
+    <div class="metrics">
+        <h2>System Metrics</h2>
+        <p><strong>CPU Usage:</strong> {{ "%.1f"|format(latest_metrics.cpu_percent) }}%</p>
+        <p><strong>Memory Usage:</strong> {{ "%.1f"|format(latest_metrics.memory_percent) }}%</p>
+        <p><strong>Memory Available:</strong> {{ "%.1f"|format(latest_metrics.memory_available_gb) }} GB</p>
+        <p><strong>Total Memory:</strong> {{ "%.1f"|format(latest_metrics.memory_total_gb) }} GB</p>
+        <p><strong>Device ID:</strong> {{ latest_metrics.device_id }}</p>
+        <div class="timestamp">Updated: {{ latest_metrics.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+    </div>
+    {% endif %}
 </body>
 </html>

@@ -36,17 +36,20 @@ class CacheConfig(BaseModel):
 
 class DatabaseConfig(BaseModel):
     db_name: str = 'db.db'  # Default value, can be overridden
-    database_url: str
+    database_url: str = None
 
     #@property allows you to define a method as a property, so you can call it like a normal attribute
     @property
     def db_path(self) -> str:
-        return os.path.join(ROOT_DIR, self.db_name)
+        # Always resolve relative to web_app directory
+        return os.path.abspath(os.path.join(ROOT_DIR, self.db_name))
 
     def __init__(self, **data):
         super().__init__(**data)
-        if 'database_url' not in data:
-            self.database_url = f'sqlite:///{self.db_path}'
+        if not self.database_url:
+            # Convert Windows path to SQLite URL format
+            db_path = self.db_path.replace('\\', '/')
+            self.database_url = f'sqlite:///{db_path}'
 
 class ConfigModel(BaseModel):
     server: ServerConfig

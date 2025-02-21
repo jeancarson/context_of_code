@@ -1,103 +1,97 @@
-import json
 import logging
 import os
 import signal
 import sys
 import time
-from typing import Dict, Any
+from pathlib import Path
+
 from local_app.monitoring.metrics_monitor import MetricsMonitor
 from local_app.monitoring.temperature_monitor import TemperatureMonitor
 from local_app.monitoring.exchange_rate_monitor import ExchangeRateMonitor
-from local_app.utils.calculator import open_calculator
+from local_app.services.system_service import SystemService
+import json
 
 logger = logging.getLogger(__name__)
 
 class Application:
-    def __init__(self, config_path: str = None):
-        if config_path is None:
-            # Default to config/config.json relative to this file
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            config_path = os.path.join(current_dir, "config", "config.json")
-        self.load_config(config_path)
+    def __init__(self):
+        self.system_service = SystemService()
+        self._load_config()
         self._setup_monitors()
-        self._stop = False
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        self._running = True
+        signal.signal(signal.SIGINT, self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
 
-    def load_config(self, config_path: str):
-        """Load configuration from JSON file"""
+    def _load_config(self):
+        """Load configuration from file"""
         try:
-            with open(config_path, 'r') as f:
+            config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+            with open(config_path) as f:
                 self.config = json.load(f)
+                logger.info("Loaded configuration from %s", config_path)
         except Exception as e:
-            logger.error(f"Failed to load config: {e}")
+            logger.error("Error loading config: %s", e)
             sys.exit(1)
 
-    def _handle_server_response(self, response: Dict[str, Any]):
-        """Central handler for all server responses"""
-        try:
-            if response.get("open_calculator", False):
-                open_calculator()
-        except Exception as e:
-            logger.error(f"Error handling server response: {e}")
-
     def _setup_monitors(self):
-        """Initialize all monitors"""
-        base_url = self.config["api"]["base_url"]
+        """Initialize and start monitoring threads"""
+        config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+        base_url = self.config['api']['base_url']
         
         self.metrics_monitor = MetricsMonitor(
             base_url=base_url,
-            poll_interval=self.config["intervals"]["metrics"],
-            response_callback=self._handle_server_response
+            poll_interval=self.config['intervals']['metrics']
         )
         
         self.temperature_monitor = TemperatureMonitor(
             base_url=base_url,
-            poll_interval=self.config["intervals"]["temperature"]
+            config_path=config_path,
+            poll_interval=self.config['intervals']['temperature']
         )
         
         self.exchange_rate_monitor = ExchangeRateMonitor(
             base_url=base_url,
-            poll_interval=self.config["intervals"]["exchange_rate"]
+            config_path=config_path,
+            poll_interval=self.config['intervals']['exchange_rate']
         )
 
-    def _signal_handler(self, signum, frame):
-        """Handle shutdown signals"""
-        logger.info(f"Received signal {signum}")
-        self._stop = True
+    def _handle_signal(self, signum, frame):
+        """Handle termination signals"""
+        logger.info("Received signal %d, shutting down...", signum)
+        self._running = False
 
-    def start(self):
-        """Start all monitors"""
-        logger.info("Starting application")
-        self.metrics_monitor.start()
-        self.temperature_monitor.start()
-        self.exchange_rate_monitor.start()
+    def run(self):
+        """Start all monitoring threads"""
+        try:
+            self.metrics_monitor.start()
+            self.temperature_monitor.start()
+            self.exchange_rate_monitor.start()
+            
+            # Keep main thread alive
+            while self._running:
+                time.sleep(1)
+                
+        except Exception as e:
+            logger.error("Error in main loop: %s", e)
+            
+        finally:
+            self._cleanup()
 
-    def stop(self):
-        """Stop all monitors"""
-        logger.info("Stopping application")
+    def _cleanup(self):
+        """Stop all monitoring threads"""
+        logger.info("Stopping monitors...")
         self.metrics_monitor.stop()
         self.temperature_monitor.stop()
         self.exchange_rate_monitor.stop()
+        logger.info("All monitors stopped")
 
 def main():
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    
-    try:
-        app = Application()
-        app.start()
-        
-        # Keep the main thread running until interrupted
-        while True:
-            time.sleep(1)
-            
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
-        app.stop()
-        sys.exit(0)
+    app = Application()
+    app.run()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

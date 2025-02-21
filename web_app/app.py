@@ -111,6 +111,125 @@ def hello():
         remote_metrics=get_latest_metrics()
     )
 
+@app.route("/dashboard")
+def country_dashboard():
+    """Display dashboard with all countries"""
+    try:
+        with get_db() as db:
+            # Get all countries
+            countries = db.query(Countries).all()
+            logger.info(f"Found {len(countries)} countries")
+            
+            if not countries:
+                logger.warning("No countries found in database")
+                return render_template('country_info.html', country=None, latest_metrics=None)
+
+            # Get first country's data for now (we can expand to multiple later)
+            country = countries[0]
+            
+            # Get latest temperature
+            latest_temp = db.query(CapitalTemperatures)\
+                .filter_by(country_id=country.id)\
+                .order_by(CapitalTemperatures.timestamp.desc())\
+                .first()
+            logger.info(f"Latest temperature: {latest_temp.temperature if latest_temp else 'No data'}")
+
+            # Get exchange rates
+            latest_rate = db.query(ExchangeRates)\
+                .join(Currencies, ExchangeRates.from_currency == Currencies.id)\
+                .filter(Currencies.currency_code == country.currency.currency_code)\
+                .order_by(ExchangeRates.timestamp.desc())\
+                .first()
+            logger.info(f"Latest exchange rate: {latest_rate.rate if latest_rate else 'No data'} (from {country.currency.currency_code} to EUR)")
+
+            # Get system metrics
+            latest_metrics = db.query(Metrics)\
+                .order_by(Metrics.timestamp.desc())\
+                .first()
+            logger.info(f"Latest metrics: CPU={latest_metrics.cpu_percent if latest_metrics else 'No data'}%, Memory={latest_metrics.memory_percent if latest_metrics else 'No data'}%")
+
+            return render_template(
+                'country_info.html',
+                country=country,
+                latest_temperature=latest_temp,
+                latest_exchange_rate=latest_rate,
+                latest_metrics=latest_metrics
+            )
+
+    except Exception as e:
+        logger.error(f"Error in country dashboard: {e}", exc_info=True)
+        return str(e), 500
+
+@app.route("/countries")
+def list_countries():
+    """Return a list of all countries and their IDs"""
+    try:
+        with get_db() as db:
+            # Join with currencies to get the data in one query
+            countries = db.query(Countries)\
+                .join(Currencies, Countries.currency_id == Currencies.id)\
+                .all()
+            
+            logger.info("Found countries: %s", [f"{c.id}: {c.country_name}" for c in countries])
+            
+            result = [{
+                'id': c.id,
+                'name': c.country_name,
+                'capital': c.capital_city,
+                'currency': c.currency.currency_code  # This should work now due to the join
+            } for c in countries]
+            
+            logger.info("Returning countries: %s", result)
+            return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error listing countries: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route("/country/<int:country_id>")
+def country_info(country_id):
+    """Display information about a specific country"""
+    try:
+        with get_db() as db:
+            # Get country info
+            country = db.query(Countries).filter_by(id=country_id).first()
+            logger.info(f"Found country: {country.country_name if country else 'Not found'}")
+            
+            if not country:
+                logger.error(f"Country not found: {country_id}")
+                return "Country not found", 404
+
+            # Get latest temperature
+            latest_temp = db.query(CapitalTemperatures)\
+                .filter_by(country_id=country_id)\
+                .order_by(CapitalTemperatures.timestamp.desc())\
+                .first()
+            logger.info(f"Latest temperature: {latest_temp.temperature if latest_temp else 'No data'}")
+
+            # Get exchange rates
+            latest_rate = db.query(ExchangeRates)\
+                .join(Currencies, ExchangeRates.from_currency == Currencies.id)\
+                .filter(Currencies.currency_code == country.currency.currency_code)\
+                .order_by(ExchangeRates.timestamp.desc())\
+                .first()
+            logger.info(f"Latest exchange rate: {latest_rate.rate if latest_rate else 'No data'} (from {country.currency.currency_code} to EUR)")
+
+            # Get system metrics
+            latest_metrics = db.query(Metrics)\
+                .order_by(Metrics.timestamp.desc())\
+                .first()
+            logger.info(f"Latest metrics: CPU={latest_metrics.cpu_percent if latest_metrics else 'No data'}%, Memory={latest_metrics.memory_percent if latest_metrics else 'No data'}%")
+
+            return render_template(
+                'country_info.html',
+                country=country,
+                latest_temperature=latest_temp,
+                latest_exchange_rate=latest_rate,
+                latest_metrics=latest_metrics
+            )
+    except Exception as e:
+        logger.error(f"Error in country_info route: {e}", exc_info=True)
+        return f"Error: {str(e)}", 500
+
 @app.route("/metrics")
 def metrics_page():
     """Display metrics dashboard"""
@@ -179,15 +298,28 @@ def store_temperatures():
     """Store temperature data received from local app"""
     try:
         if not request.is_json:
+            logger.error("Request Content-Type is not application/json")
             return jsonify({"error": "Content-Type must be application/json"}), 400
 
         data = request.get_json()
-        if not data or 'temperatures' not in data:
-            return jsonify({'error': 'Invalid request data'}), 400
+        logger.info(f"Received temperature data: {data}")
+        
+        if not data:
+            logger.error("No data in request")
+            return jsonify({'error': 'No data in request'}), 400
+            
+        if 'temperatures' not in data:
+            logger.error(f"Invalid request data format. Expected 'temperatures' key. Got: {data.keys()}")
+            return jsonify({'error': 'Invalid request data format. Missing temperatures key'}), 400
 
         with get_db() as db:
             for temp_data in data['temperatures']:
+                if not all(k in temp_data for k in ['country_id', 'temperature', 'timestamp']):
+                    logger.error(f"Missing required fields in temperature data: {temp_data}")
+                    return jsonify({'error': 'Missing required fields in temperature data'}), 400
+                    
                 temp = CapitalTemperatures(
+                    id=str(uuid.uuid4()),  # Generate UUID for each record
                     country_id=temp_data['country_id'],
                     temperature=temp_data['temperature'],
                     timestamp=datetime.datetime.fromisoformat(temp_data['timestamp'])
@@ -209,24 +341,41 @@ def store_exchange_rate():
             return jsonify({"error": "Content-Type must be application/json"}), 400
 
         data = request.get_json()
+        logger.info(f"Received exchange rate data: {data}")
+        
         if not data or 'exchange_rate' not in data:
             return jsonify({'error': 'Invalid request data'}), 400
 
         rate_data = data['exchange_rate']
         with get_db() as db:
+            # Get or create currencies
+            from_currency = db.query(Currencies).filter_by(currency_code=rate_data['from_currency']).first()
+            if not from_currency:
+                from_currency = Currencies(currency_code=rate_data['from_currency'], currency_name=rate_data['from_currency'])
+                db.add(from_currency)
+                db.flush()  # Get the ID
+
+            to_currency = db.query(Currencies).filter_by(currency_code=rate_data['to_currency']).first()
+            if not to_currency:
+                to_currency = Currencies(currency_code=rate_data['to_currency'], currency_name=rate_data['to_currency'])
+                db.add(to_currency)
+                db.flush()  # Get the ID
+            
             rate = ExchangeRates(
-                from_currency=rate_data['from_currency'],
-                to_currency=rate_data['to_currency'],
+                id=str(uuid.uuid4()),
+                from_currency=from_currency.id,
+                to_currency=to_currency.id,
                 rate=rate_data['rate'],
-                timestamp=datetime.datetime.fromisoformat(rate_data['timestamp'])
+                timestamp=datetime.datetime.fromisoformat(rate_data['timestamp'].replace('Z', '+00:00'))
             )
             db.add(rate)
             db.commit()
+            logger.info("Successfully stored exchange rate")
 
         return jsonify({'status': 'success'}), 201
 
     except Exception as e:
-        logger.error(f"Error storing exchange rate: {e}")
+        logger.error(f"Error storing exchange rate: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route("/exchange-rates", methods=["POST"])
@@ -288,39 +437,6 @@ def check_calculator():
     if calculator_requested:
         calculator_requested = False
     return jsonify(response), StatusCode.OK
-
-@app.route("/dashboard/<country>")
-def country_dashboard(country):
-    """Display country dashboard with temperature and exchange rate"""
-    try:
-        with get_db() as db:
-            # Get country and its currency
-            country_data = db.query(Countries).filter_by(country_name=country).first()
-            if not country_data:
-                return jsonify({"error": "Country not found"}), StatusCode.NOT_FOUND
-            
-            # Get latest temperature
-            latest_temp = db.query(CapitalTemperatures)\
-                .filter_by(country_id=country_data.id)\
-                .order_by(desc(CapitalTemperatures.timestamp))\
-                .first()
-            
-            # Get latest exchange rates for the country's currency
-            latest_rates = db.query(ExchangeRates)\
-                .filter(ExchangeRates.from_currency == country_data.currency_id)\
-                .order_by(desc(ExchangeRates.timestamp))\
-                .all()
-            
-            return render_template(
-                "country_dashboard.html",
-                country=country_data,
-                temperature=latest_temp,
-                exchange_rates=latest_rates
-            )
-            
-    except Exception as e:
-        logger.error(f"Error retrieving dashboard data: {e}")
-        return jsonify({"error": "Internal server error"}), StatusCode.INTERNAL_SERVER_ERROR
 
 @app.route('/static/<path:path>')
 def send_static(path):

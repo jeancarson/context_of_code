@@ -12,8 +12,8 @@ from local_app.utils.calculator import open_calculator
 logger = logging.getLogger(__name__)
 
 class TemperatureMonitor:
-    def __init__(self, base_url: str, poll_interval: int = 3600):
-        self.temperature_service = TemperatureService()
+    def __init__(self, base_url: str, config_path: str, poll_interval: int = 3600):
+        self.temperature_service = TemperatureService(config_path)
         self.base_url = base_url
         self.poll_interval = poll_interval
         self.last_collection = 0
@@ -25,69 +25,47 @@ class TemperatureMonitor:
     def collect_and_send_data(self):
         """Collect temperature data and send to server"""
         try:
-            logger.warning("Fetching temperatures from temperature service...")
-            temps = self.temperature_service.get_all_temperatures()
-            if not temps:
+            temp_data = self.temperature_service.get_current_temperature()
+            if temp_data is None:
                 logger.warning("No temperature data available")
                 return
+
+            # Format data for server
+            payload = {
+                'temperatures': [{
+                    'country_id': 1,  # Assuming GB is ID 1
+                    'temperature': temp_data['temperature'],
+                    'timestamp': temp_data['timestamp']
+                }]
+            }
             
-            logger.info(f"Got temperatures for {len(temps)} cities: {temps}")
-            
-            # Convert to proper model objects
-            temp_models = [
-                CapitalTemperature(
-                    id=None,  # ID will be assigned by the server
-                    country_id=temp['country_code'],  # Use country_code as the country_id
-                    temperature=temp['temperature'],
-                    timestamp=datetime.fromisoformat(temp['timestamp'])
-                ) for temp in temps
-            ]
-            
-            # Send to server
-            payload = {'temperatures': [temp.to_dict() for temp in temp_models]}
             logger.info(f"Sending temperature data to {self.base_url}/temperatures: {payload}")
             
             response = requests.post(
                 f"{self.base_url}/temperatures",
-                json=payload,
-                headers={'Content-Type': 'application/json'}
+                json=payload
             )
-            response.raise_for_status()
-            response_data = response.json()
-            logger.info(f"Server response: {response_data}")
             
-            # Check if calculator should be opened
-            if response_data.get('open_calculator', False):
-                logger.warning("Server requested to open calculator")
-                open_calculator()
+            if response.status_code != 201:
+                logger.error(f"Server returned error: {response.status_code} - {response.text}")
+                response.raise_for_status()
             
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error sending temperature data: {e}")
-            # Queue for retry
-            self._retry_queue.put(temps)
+            logger.info("Successfully sent temperature data")
+            
         except Exception as e:
-            logger.error(f"Error collecting temperature data: {e}", exc_info=True)
+            logger.error(f"Error collecting temperature data: {e}")
+            if 'temp_data' in locals():
+                self._retry_queue.put(temp_data)
 
     def _retry_failed_requests(self):
         """Retry failed requests"""
         while self._running:
             try:
                 if not self._retry_queue.empty():
-                    temps = self._retry_queue.get()
-                    temp_models = [
-                        CapitalTemperature(
-                            id=None,  # ID will be assigned by the server
-                            country_id=temp['country_code'],  # Use country_code as the country_id
-                            temperature=temp['temperature'],
-                            timestamp=datetime.fromisoformat(temp['timestamp'])
-                        ) for temp in temps
-                    ]
-                    
-                    payload = {'temperatures': [temp.to_dict() for temp in temp_models]}
+                    temp_data = self._retry_queue.get()
                     response = requests.post(
                         f"{self.base_url}/temperatures",
-                        json=payload,
-                        headers={'Content-Type': 'application/json'}
+                        json=temp_data
                     )
                     response.raise_for_status()
                     logger.info("Successfully resent queued temperature data")
@@ -96,8 +74,8 @@ class TemperatureMonitor:
                     
             except Exception as e:
                 logger.error(f"Error in retry loop: {e}")
-                if 'temps' in locals():
-                    self._retry_queue.put(temps)
+                if 'temp_data' in locals():
+                    self._retry_queue.put(temp_data)
                 time.sleep(60)
 
     def run(self):
