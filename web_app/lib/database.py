@@ -2,9 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, 
 from sqlalchemy.orm import sessionmaker, scoped_session
 import os
 from contextlib import contextmanager
-from .models.generated_models import Base, Metrics
-from .models.visit_model import Visit
-from .models.temperature_model import CapitalTemperature
+from .models.generated_models import Base, Metrics, Visits, Countries, Currencies, ExchangeRates, CapitalTemperatures
 from .config import database
 import logging
 
@@ -12,6 +10,10 @@ import logging
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Create engine and session
+logger = logging.getLogger(__name__)
+logger.info(f"Database config: {database.__dict__}")
+logger.info(f"Database path: {database.db_path}")
+logger.info(f"Using database URL: {database.database_url}")
 engine = create_engine(database.database_url)
 
 # Create a scoped session factory

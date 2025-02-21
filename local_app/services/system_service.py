@@ -1,19 +1,19 @@
-import psutil
 import logging
 import platform
-from datetime import datetime
-from local_app.models.system_metrics import SystemMetrics
+import psutil
 import uuid
 import os
+from datetime import datetime
+from local_app.models.metrics import Metrics
 
 logger = logging.getLogger(__name__)
 
-class SystemMonitor:
+class SystemService:
+    """Service for collecting system metrics"""
+    
     def __init__(self):
-        self.is_windows = platform.system() == "Windows"
         self.device_id = self._get_or_create_device_id()
-        
-        logger.info("System monitor initialized")
+        logger.info("System service initialized")
 
     def _get_or_create_device_id(self) -> str:
         """Get or create a unique device identifier"""
@@ -28,10 +28,10 @@ class SystemMonitor:
             f.write(device_id)
         return device_id
 
-
-    def get_metrics(self) -> SystemMetrics:
+    def get_metrics(self) -> Metrics:
         """Get current system metrics"""
-        return SystemMetrics(
+        return Metrics(
+            id=None,  # ID will be assigned by the server
             timestamp=datetime.utcnow(),
             cpu_percent=psutil.cpu_percent(),
             memory_percent=psutil.virtual_memory().percent,

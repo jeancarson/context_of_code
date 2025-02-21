@@ -27,7 +27,7 @@
         }
     },
     "database": {
-        "database_url": "sqlite:///db.db"
+        "db_name": "db.db"
     },
     "debug": false
 }

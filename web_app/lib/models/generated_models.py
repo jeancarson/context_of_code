@@ -8,18 +8,6 @@ class Base(DeclarativeBase):
     pass
 
 
-class Metrics(Base):
-    __tablename__ = 'Metrics'
-
-    timestamp: Mapped[datetime.datetime] = mapped_column(DateTime)
-    cpu_percent: Mapped[float] = mapped_column(Float)
-    memory_percent: Mapped[float] = mapped_column(Float)
-    memory_available_gb: Mapped[float] = mapped_column(Float)
-    memory_total_gb: Mapped[float] = mapped_column(Float)
-    device_id: Mapped[str] = mapped_column(String(100))
-    id: Mapped[Optional[int]] = mapped_column(Integer, primary_key=True)
-
-
 class Currencies(Base):
     __tablename__ = 'currencies'
 
@@ -30,6 +18,18 @@ class Currencies(Base):
     countries: Mapped[List['Countries']] = relationship('Countries', back_populates='currency')
     exchange_rates: Mapped[List['ExchangeRates']] = relationship('ExchangeRates', foreign_keys='[ExchangeRates.from_currency]', back_populates='currencies')
     exchange_rates_: Mapped[List['ExchangeRates']] = relationship('ExchangeRates', foreign_keys='[ExchangeRates.to_currency]', back_populates='currencies_')
+
+
+class Metrics(Base):
+    __tablename__ = 'metrics'
+
+    timestamp: Mapped[datetime.datetime] = mapped_column(DateTime)
+    cpu_percent: Mapped[float] = mapped_column(Float)
+    memory_percent: Mapped[float] = mapped_column(Float)
+    memory_available_gb: Mapped[float] = mapped_column(Float)
+    memory_total_gb: Mapped[float] = mapped_column(Float)
+    device_id: Mapped[str] = mapped_column(String(100))
+    id: Mapped[Optional[int]] = mapped_column(Integer, primary_key=True)
 
 
 class Visits(Base):

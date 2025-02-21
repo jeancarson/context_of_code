@@ -43,12 +43,12 @@
         <a href="/metrics" class="box">
             HELLO
         </a>
-        <button class="task-manager-btn" onclick="openTaskManager()">Open calculator</button>
+        <button class="task-manager-btn" onclick="openCalculator()">Open calculator</button>
     </div>
 
     <script>
-        function openTaskManager() {
-            fetch('/toggle-task-manager', {
+        function openCalculator() {
+            fetch('/toggle-calculator', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -61,10 +61,10 @@
                 return response.json();
             })
             .then(data => {
-                if (data.status === 'success') {
-                    alert('calculator request sent! It will open in the next data collection cycle (within 60 seconds).');
+                if (data.calculator_requested) {
+                    alert('Calculator request sent! It will open shortly.');
                 } else {
-                    alert('Error: ' + (data.message || 'Unknown error'));
+                    alert('Error: Failed to request calculator');
                 }
             })
             .catch(error => {
