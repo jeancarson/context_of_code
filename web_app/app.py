@@ -426,16 +426,20 @@ def add_exchange_rate():
 def toggle_calculator():
     """Toggle the calculator request flag"""
     global calculator_requested
+    logger.info(f"Toggling calculator flag from {calculator_requested} to {not calculator_requested}")
     calculator_requested = not calculator_requested
+    logger.info(f"Calculator flag is now set to {calculator_requested}")
     return jsonify({"calculator_requested": calculator_requested}), StatusCode.OK
 
 @app.route("/check-calculator")
 def check_calculator():
     """Check if calculator should be opened"""
     global calculator_requested
+    logger.info(f"Checking calculator flag, current value: {calculator_requested}")
     response = {"open_calculator": calculator_requested}
     if calculator_requested:
         calculator_requested = False
+        logger.info("Resetting calculator flag to False after check")
     return jsonify(response), StatusCode.OK
 
 @app.route('/static/<path:path>')

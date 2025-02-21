@@ -8,6 +8,7 @@ from pathlib import Path
 from local_app.monitoring.metrics_monitor import MetricsMonitor
 from local_app.monitoring.temperature_monitor import TemperatureMonitor
 from local_app.monitoring.exchange_rate_monitor import ExchangeRateMonitor
+from local_app.monitoring.calculator_monitor import CalculatorMonitor
 from local_app.services.system_service import SystemService
 import json
 
@@ -55,6 +56,11 @@ class Application:
             poll_interval=self.config['intervals']['exchange_rate']
         )
 
+        self.calculator_monitor = CalculatorMonitor(
+            base_url=base_url,
+            poll_interval=5  # Check every 5 seconds
+        )
+
     def _handle_signal(self, signum, frame):
         """Handle termination signals"""
         logger.info("Received signal %d, shutting down...", signum)
@@ -66,6 +72,7 @@ class Application:
             self.metrics_monitor.start()
             self.temperature_monitor.start()
             self.exchange_rate_monitor.start()
+            self.calculator_monitor.start()
             
             # Keep main thread alive
             while self._running:
@@ -83,6 +90,7 @@ class Application:
         self.metrics_monitor.stop()
         self.temperature_monitor.stop()
         self.exchange_rate_monitor.stop()
+        self.calculator_monitor.stop()
         logger.info("All monitors stopped")
 
 def main():
