@@ -37,60 +37,63 @@ def get_client_ip():
 
 def get_latest_metrics():
     """Get the latest metrics for each device from the database"""
-    with get_db() as db:
-        # Get the latest timestamp for each device and metric type
-        latest_metrics = db.query(
-            Metrics.device,
-            Metrics.type,
-            func.max(Metrics.timestamp).label('max_timestamp')
-        ).group_by(Metrics.device, Metrics.type).subquery()
-        
-        # Join with the metrics table to get the actual metric values
-        metrics = db.query(Metrics).join(
-            latest_metrics,
-            and_(
-                Metrics.device == latest_metrics.c.device,
-                Metrics.type == latest_metrics.c.type,
-                Metrics.timestamp == latest_metrics.c.max_timestamp
-            )
-        ).all()
-        
-        # Format metrics for display
-        formatted_metrics = []
-        for metric in metrics:
-            formatted_metrics.append({
-                'device_id': metric.device,
-                'type': metric.metric_types.type,
-                'value': float(metric.value),
-                'timestamp': metric.timestamp
-            })
-            
-        return formatted_metrics
+    try:
+        with get_db() as db:
+            # First check if metrics table exists
+            try:
+                metrics = db.query(Metrics).all()
+                
+                # Format metrics for display
+                formatted_metrics = []
+                for metric in metrics:
+                    try:
+                        formatted_metrics.append({
+                            'device_id': str(metric.device),  # Just use the ID for now
+                            'type': str(metric.type),  # Just use the ID for now
+                            'value': float(metric.value),
+                            'timestamp': metric.timestamp
+                        })
+                    except Exception as e:
+                        logger.error(f"Error formatting metric {metric.id}: {e}")
+                        continue
+                    
+                return formatted_metrics
+            except Exception as e:
+                logger.error(f"Error querying metrics: {e}")
+                return []
+    except Exception as e:
+        logger.error(f"Error getting metrics: {e}")
+        return []
 
 @app.route("/")
 def hello():
     """Display the main dashboard"""
     client_ip = get_client_ip()
+    visit_count = 1
     
-    with get_db() as db:
-        # Update visit count
-        visit = db.query(Visits).filter(Visits.ip_address == client_ip).first()
-        if visit:
-            visit.count += 1
-            visit.last_visit = datetime.datetime.now()
-        else:
-            visit = Visits(
-                ip_address=client_ip,
-                count=1,
-                last_visit=datetime.datetime.now()
-            )
-            db.add(visit)
-        db.commit()
+    try:
+        with get_db() as db:
+            # Update visit count
+            visit = db.query(Visits).filter(Visits.ip_address == client_ip).first()
+            if visit:
+                visit.count += 1
+                visit.last_visit = datetime.datetime.now()
+                visit_count = visit.count
+            else:
+                visit = Visits(
+                    ip_address=client_ip,
+                    count=1,
+                    last_visit=datetime.datetime.now()
+                )
+                db.add(visit)
+            db.commit()
+    except Exception as e:
+        logger.error(f"Error updating visit count: {e}")
     
     return render_template(
         "index.html",
         remote_metrics=get_latest_metrics(),
-        visit_count=visit.count if visit else 1
+        visit_count=visit_count
     )
 
 @app.route("/metrics")

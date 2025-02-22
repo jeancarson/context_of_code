@@ -1,53 +1,55 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, MetaData
-from sqlalchemy.orm import sessionmaker, scoped_session
 import os
-from contextlib import contextmanager
-from .models.generated_models import Base, Metrics, Visits, Countries, Currencies, ExchangeRates, CapitalTemperatures
-from .config import database
 import logging
+from sqlalchemy import create_engine, text, inspect
+from sqlalchemy.orm import sessionmaker
+from contextlib import contextmanager
+from .models.generated_models import Base, Metrics, Visits, Devices, MetricTypes
 
-# Get the root directory of the project
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# Create engine and session
 logger = logging.getLogger(__name__)
-logger.info(f"Database config: {database.__dict__}")
-logger.info(f"Database path: {database.db_path}")
-logger.info(f"Using database URL: {database.database_url}")
-engine = create_engine(database.database_url)
 
-# Create a scoped session factory
-Session = scoped_session(sessionmaker(bind=engine))
+# Get the web_app directory path
+WEB_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Database URL - use web_app/db.db
+db_path = os.path.join(WEB_APP_DIR, 'db.db')
+logger.info(f"Using database at: {db_path}")
+DATABASE_URL = f"sqlite:///{db_path}"
+
+# Create engine
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def init_db():
+    """Initialize database, creating tables only if they don't exist"""
+    try:
+        # Create tables only if they don't exist
+        inspector = inspect(engine)
+        existing_tables = inspector.get_table_names()
+        
+        # Get list of tables we need
+        needed_tables = {table.__tablename__ for table in Base.__subclasses__()}
+        
+        # Create only missing tables
+        missing_tables = needed_tables - set(existing_tables)
+        if missing_tables:
+            logger.info(f"Creating missing tables: {missing_tables}")
+            Base.metadata.create_all(bind=engine)
+        else:
+            logger.info("All required tables already exist")
+        
+        # Verify we can connect
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        logger.info("Database connection verified successfully")
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+        raise
 
 @contextmanager
 def get_db():
-    """Get a database session using a context manager.
-    
-    Usage:
-        with get_db() as db:
-            result = db.query(Metrics).all()
-            # session is automatically closed after the with block
-    """
-    session = Session()
+    """Get a database session"""
+    db = SessionLocal()
     try:
-        yield session
-        session.commit()
-    except:
-        session.rollback()
-        raise
+        yield db
     finally:
-        session.close()
-        Session.remove()
-
-def init_db():
-    """Initialize the database, creating only missing tables"""
-    try:
-        # Create tables if they don't exist
-        Base.metadata.create_all(bind=engine)
-        logging.info("Database tables verified/created successfully")
-    except Exception as e:
-        logging.error(f"Error initializing database: {e}")
-        raise
-
-# Alias get_db as get_session for compatibility
-get_session = get_db
+        db.close()
