@@ -1,7 +1,6 @@
 import psutil
 from typing import List
-from ..base_device import BaseDevice
-from ...models.metric_dto import MetricDTO
+from ..base_device import BaseDevice, MetricDTO
 
 class LocalMetricsService(BaseDevice):
     def __init__(self, base_url: str, poll_interval: int):

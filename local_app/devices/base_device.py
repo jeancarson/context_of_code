@@ -5,10 +5,17 @@ import time
 import uuid
 from pathlib import Path
 from typing import Optional
-
-from ..models.metric_dto import MetricDTO
+from dataclasses import dataclass
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class MetricDTO:
+    type: str  # e.g., "GPBtoEURexchangeRate", "RAMPercent", "Temperature"
+    value: float
+    uuid: Optional[UUID] = None  # Will be None if not yet assigned
+    timestamp: Optional[float] = None  # Will be set by the service before sending
 
 class BaseDevice:
     def __init__(self, device_name: str, metric_type: str, base_url: str, poll_interval: int):

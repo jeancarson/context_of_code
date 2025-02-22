@@ -3,22 +3,21 @@ import os
 import signal
 import sys
 import time
+import json
+from typing import List
 from pathlib import Path
 
-from local_app.monitoring.metrics_monitor import MetricsMonitor
-from local_app.monitoring.temperature_monitor import TemperatureMonitor
-from local_app.monitoring.exchange_rate_monitor import ExchangeRateMonitor
-from local_app.monitoring.calculator_monitor import CalculatorMonitor
-from local_app.services.system_service import SystemService
-import json
+from devices.temperature.service import TemperatureService
+from devices.exchange_rate.service import ExchangeRateService
+from devices.local.service import LocalMetricsService
+from devices.base_device import MetricDTO
 
 logger = logging.getLogger(__name__)
 
 class Application:
     def __init__(self):
-        self.system_service = SystemService()
         self._load_config()
-        self._setup_monitors()
+        self._setup_devices()
         self._running = True
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -34,31 +33,23 @@ class Application:
             logger.error("Error loading config: %s", e)
             sys.exit(1)
 
-    def _setup_monitors(self):
-        """Initialize and start monitoring threads"""
-        config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+    def _setup_devices(self):
+        """Initialize device services"""
         base_url = self.config['api']['base_url']
         
-        self.metrics_monitor = MetricsMonitor(
+        self.temperature_service = TemperatureService(
             base_url=base_url,
-            poll_interval=self.config['intervals']['metrics']
-        )
-        
-        self.temperature_monitor = TemperatureMonitor(
-            base_url=base_url,
-            config_path=config_path,
             poll_interval=self.config['intervals']['temperature']
         )
         
-        self.exchange_rate_monitor = ExchangeRateMonitor(
+        self.exchange_rate_service = ExchangeRateService(
             base_url=base_url,
-            config_path=config_path,
             poll_interval=self.config['intervals']['exchange_rate']
         )
-
-        self.calculator_monitor = CalculatorMonitor(
+        
+        self.local_metrics_service = LocalMetricsService(
             base_url=base_url,
-            poll_interval=5  # Check every 5 seconds
+            poll_interval=self.config['intervals']['metrics']
         )
 
     def _handle_signal(self, signum, frame):
@@ -66,17 +57,42 @@ class Application:
         logger.info("Received signal %d, shutting down...", signum)
         self._running = False
 
+    def collect_metrics(self) -> List[MetricDTO]:
+        """Collect metrics from all devices"""
+        metrics = []
+        
+        # Temperature metric
+        temp = self.temperature_service.get_current_temperature()
+        metrics.append(self.temperature_service.create_metric(temp))
+        
+        # Exchange rate metric
+        rate = self.exchange_rate_service.get_current_rate()
+        metrics.append(self.exchange_rate_service.create_metric(rate))
+        
+        # Local system metrics
+        metrics.extend(self.local_metrics_service.get_current_metrics())
+        
+        return metrics
+
     def run(self):
-        """Start all monitoring threads"""
+        """Main application loop"""
         try:
-            self.metrics_monitor.start()
-            self.temperature_monitor.start()
-            self.exchange_rate_monitor.start()
-            self.calculator_monitor.start()
-            
-            # Keep main thread alive
             while self._running:
-                time.sleep(1)
+                try:
+                    metrics = self.collect_metrics()
+                    # TODO: Send metrics to server
+                    # For now just log them
+                    for metric in metrics:
+                        logger.info(f"Collected metric: {metric}")
+                    
+                    time.sleep(min(
+                        self.config['intervals']['metrics'],
+                        self.config['intervals']['temperature'],
+                        self.config['intervals']['exchange_rate']
+                    ))
+                except Exception as e:
+                    logger.error(f"Error collecting metrics: {e}")
+                    time.sleep(5)  # Wait before retrying
                 
         except Exception as e:
             logger.error("Error in main loop: %s", e)
@@ -85,13 +101,8 @@ class Application:
             self._cleanup()
 
     def _cleanup(self):
-        """Stop all monitoring threads"""
-        logger.info("Stopping monitors...")
-        self.metrics_monitor.stop()
-        self.temperature_monitor.stop()
-        self.exchange_rate_monitor.stop()
-        self.calculator_monitor.stop()
-        logger.info("All monitors stopped")
+        """Cleanup resources"""
+        logger.info("Shutting down application...")
 
 def main():
     logging.basicConfig(
