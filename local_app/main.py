@@ -1,15 +1,14 @@
+import asyncio
+import json
 import logging
 import os
 import signal
 import sys
 import time
-import json
-from typing import List
-from pathlib import Path
-import requests
-import asyncio
-import aiohttp
 from datetime import datetime
+from typing import List
+import aiohttp
+
 from devices.temperature.service import TemperatureService
 from devices.exchange_rate.service import ExchangeRateService
 from devices.local.service import LocalMetricsService
@@ -22,49 +21,52 @@ class Application:
         self._load_config()
         self._setup_devices()
         self._running = True
+        self._event_loop = None
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
     def _load_config(self):
         """Load configuration from file"""
+        config_path = os.path.join(os.path.dirname(__file__), 'config.json')
         try:
-            config_path = os.path.join(os.path.dirname(__file__), 'config.json')
-            with open(config_path) as f:
+            with open(config_path, 'r') as f:
                 self.config = json.load(f)
-                logger.info("Loaded configuration from %s", config_path)
+            logger.info(f"Loaded configuration from {config_path}")
         except Exception as e:
-            logger.error("Error loading config: %s", e)
+            logger.error(f"Error loading config from {config_path}: {e}")
             sys.exit(1)
 
     def _setup_devices(self):
         """Initialize device services"""
-        base_url = self.config['api']['base_url']
-        
-        # Initialize devices one at a time to avoid database locks
-        logger.info("Initializing temperature service...")
-        self.temperature_service = TemperatureService(
-            base_url=base_url,
-            poll_interval=self.config['intervals']['temperature']
-        )
-        
-        logger.info("Initializing exchange rate service...")
-        self.exchange_rate_service = ExchangeRateService(
-            base_url=base_url,
-            poll_interval=self.config['intervals']['exchange_rate']
-        )
-        
-        logger.info("Initializing local metrics service...")
-        self.local_metrics_service = LocalMetricsService(
-            base_url=base_url,
-            poll_interval=self.config['intervals']['local']
-        )
-        
-        self.devices = [
-            self.temperature_service,
-            self.exchange_rate_service,
-            self.local_metrics_service
-        ]
-        logger.info("All devices initialized successfully")
+        try:
+            logger.info("Initializing temperature service...")
+            self.temperature_service = TemperatureService(
+                base_url=self.config['api']['base_url'],
+                poll_interval=self.config['intervals']['temperature']
+            )
+            
+            logger.info("Initializing exchange rate service...")
+            self.exchange_rate_service = ExchangeRateService(
+                base_url=self.config['api']['base_url'],
+                poll_interval=self.config['intervals']['exchange_rate']
+            )
+            
+            logger.info("Initializing local metrics service...")
+            self.local_metrics_service = LocalMetricsService(
+                base_url=self.config['api']['base_url'],
+                poll_interval=self.config['intervals']['local']
+            )
+            
+            logger.info("All devices initialized successfully")
+        except Exception as e:
+            logger.error(f"Error setting up devices: {e}")
+            sys.exit(1)
+
+    def _cleanup(self):
+        """Cleanup resources"""
+        logger.info("Shutting down application...")
+        if self._event_loop:
+            self._event_loop.close()
 
     def _handle_signal(self, signum, frame):
         """Handle termination signals"""
@@ -121,12 +123,14 @@ class Application:
                         f"{self.config['api']['base_url']}/api/metrics",
                         json={"metrics": metrics_to_send}
                     ) as response:
+                        data = await response.json()
                         if response.status != 200:
                             logger.error(f"Error sending metrics: {response.status}")
-                            data = await response.json()
                             logger.error(f"Server response: {data}")
                             if response.status == 500:
                                 logger.error(f"Request data that caused error: {metrics_to_send}")
+                        elif data.get('errors'):
+                            logger.warning(f"Some metrics failed: {data['errors']}")
                         else:
                             logger.debug(f"Successfully sent {len(metrics_to_send)} metrics")
             except Exception as e:
@@ -164,30 +168,45 @@ class Application:
         logger.error(f"Device {device.device_name} has no UUID")
         return None
 
+    async def run_async(self):
+        """Async main loop"""
+        logger.info("Starting async loop...")
+        while self._running:
+            try:
+                logger.info("Collecting metrics...")
+                await self.collect_metrics()
+                interval = min(
+                    self.config['intervals']['local'],
+                    self.config['intervals']['exchange_rate'],
+                    self.config['intervals']['temperature']
+                )
+                logger.info(f"Sleeping for {interval} seconds...")
+                await asyncio.sleep(interval)
+            except Exception as e:
+                logger.error(f"Error in async loop: {str(e)}")
+                if hasattr(e, '__traceback__'):
+                    import traceback
+                    logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+                await asyncio.sleep(1)
+
     def run(self):
         """Main application loop"""
         logger.info("Starting application...")
         try:
-            while self._running:
-                try:
-                    asyncio.run(self.collect_metrics())
-                except Exception as e:
-                    logger.error(f"Error in main loop: {str(e)}")
-                    if hasattr(e, '__traceback__'):
-                        import traceback
-                        logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
-                
-                time.sleep(min(
-                    self.config['intervals']['metrics'],
-                    self.config['intervals']['exchange_rate'],
-                    self.config['intervals']['temperature']
-                ))
+            # Create a new event loop
+            if self._event_loop is None:
+                self._event_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self._event_loop)
+            
+            # Run the async loop
+            self._event_loop.run_until_complete(self.run_async())
+        except Exception as e:
+            logger.error(f"Error in main loop: {e}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
         finally:
             self._cleanup()
-
-    def _cleanup(self):
-        """Cleanup resources"""
-        logger.info("Shutting down application...")
 
 def main():
     logging.basicConfig(

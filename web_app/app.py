@@ -5,7 +5,7 @@ from flask import Flask, jsonify, send_from_directory, request, render_template
 from lib.config import Config
 import logging
 from lib.database import init_db, get_db
-from lib.models.generated_models import Devices, MetricTypes, Metrics
+from lib.models.generated_models import Devices, MetricTypes, Metrics, Visits
 from lib.constants import StatusCode, HTTPStatusCode
 from sqlalchemy import select, func, and_, desc, text
 import sys
@@ -15,7 +15,8 @@ from lib.services.orm_service import (
     get_all_devices,
     get_all_metric_types,
     get_recent_metrics,
-    get_all_visits
+    get_all_visits,
+    get_latest_metrics_by_type
 )
 
 # Compute root directory once and use it throughout the file
@@ -42,31 +43,29 @@ def get_latest_metrics():
     """Get the latest metrics for each device from the database"""
     try:
         with get_db() as db:
-            # First check if metrics table exists
-            try:
-                metrics = db.query(Metrics).all()
-                
-                # Format metrics for display
-                formatted_metrics = []
-                for metric in metrics:
-                    try:
-                        formatted_metrics.append({
-                            'device_id': str(metric.device),  # Just use the ID for now
-                            'type': str(metric.type),  # Just use the ID for now
-                            'value': float(metric.value),
-                            'created_at': metric.created_at
-                        })
-                    except Exception as e:
-                        logger.error(f"Error formatting metric {metric.id}: {e}")
-                        continue
-                    
-                return formatted_metrics
-            except Exception as e:
-                logger.error(f"Error querying metrics: {e}")
-                return []
+            # Get all metrics with their types and devices
+            metrics = (
+                db.query(Metrics, MetricTypes, Devices)
+                .join(MetricTypes, Metrics.type == MetricTypes.id)
+                .join(Devices, Metrics.device == Devices.id)
+                .order_by(Metrics.created_at.desc())
+                .all()
+            )
+
+            # Group metrics by device
+            metrics_by_device = {}
+            for metric, metric_type, device in metrics:
+                if device.uuid not in metrics_by_device:
+                    metrics_by_device[device.uuid] = {
+                        'timestamp': datetime.datetime.strptime(metric.created_at, '%Y-%m-%d %H:%M:%S.%f'),
+                        'metrics': {}
+                    }
+                metrics_by_device[device.uuid]['metrics'][metric_type.type] = float(metric.value)
+
+            return metrics_by_device
     except Exception as e:
-        logger.error(f"Error getting metrics: {e}")
-        return []
+        logger.error(f"Error getting latest metrics: {e}")
+        return {}
 
 @app.route("/")
 def hello():
@@ -163,6 +162,7 @@ def store_metrics():
             }), HTTPStatusCode.BAD_REQUEST.value
 
         metrics_request = MetricsRequest(**request.json)
+        errors = []
         
         with get_db() as db:
             for metric_dto in metrics_request.metrics:
@@ -170,16 +170,14 @@ def store_metrics():
                     # Get or create metric type
                     metric_type = get_or_create_metric_type(db, metric_dto.type)
                     if not metric_type:
-                        logger.error(f"Failed to get/create metric type: {metric_dto.type}")
+                        errors.append(f"Failed to get/create metric type: {metric_dto.type}")
                         continue
 
                     # Get device by UUID
                     device = get_device_by_uuid(db, metric_dto.device_id)
                     if not device:
-                        return jsonify({
-                            'error': f'Device not found: {metric_dto.device_id}',
-                            'status': StatusCode.NOT_FOUND.value
-                        }), HTTPStatusCode.NOT_FOUND.value
+                        errors.append(f"Device not found: {metric_dto.device_id}")
+                        continue
                     
                     # Create metric
                     metric = Metrics(
@@ -191,17 +189,26 @@ def store_metrics():
                     db.add(metric)
                 
                 except Exception as e:
-                    logger.error(f"Error storing metric: {e}")
-                    return jsonify({
-                        'error': str(e),
-                        'status': StatusCode.ERROR.value
-                    }), HTTPStatusCode.INTERNAL_SERVER_ERROR.value
+                    errors.append(f"Error storing metric: {e}")
+                    continue
             
-            db.commit()
-            return jsonify({'status': StatusCode.OK.value})
+            try:
+                db.commit()
+            except Exception as e:
+                errors.append(f"Error committing to database: {e}")
+                return jsonify({
+                    'error': str(e),
+                    'errors': errors,
+                    'status': StatusCode.ERROR.value
+                }), HTTPStatusCode.INTERNAL_SERVER_ERROR.value
+            
+            # Return success even if some metrics failed
+            return jsonify({
+                'status': StatusCode.OK.value,
+                'errors': errors if errors else None
+            })
             
     except Exception as e:
-        logger.error(f"Error processing metrics request: {e}")
         return jsonify({
             'error': str(e),
             'status': StatusCode.ERROR.value
@@ -214,7 +221,7 @@ def debug():
         "debug.html",
         devices=get_all_devices(),
         metric_types=get_all_metric_types(),
-        metrics=get_recent_metrics(limit=50),
+        metrics=get_latest_metrics_by_type(),
         visits=get_all_visits()
     )
 
