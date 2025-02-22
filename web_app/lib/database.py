@@ -1,53 +1,65 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, MetaData
-from sqlalchemy.orm import sessionmaker, scoped_session
 import os
-from contextlib import contextmanager
-from .models.generated_models import Base, Metrics, Visits, Countries, Currencies, ExchangeRates, CapitalTemperatures
-from .config import database
 import logging
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.pool import QueuePool
+from contextlib import contextmanager
+from .models.generated_models import Base, Metrics, Visits, Devices, MetricTypes
 
-# Get the root directory of the project
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# Create engine and session
 logger = logging.getLogger(__name__)
-logger.info(f"Database config: {database.__dict__}")
-logger.info(f"Database path: {database.db_path}")
-logger.info(f"Using database URL: {database.database_url}")
-engine = create_engine(database.database_url)
 
-# Create a scoped session factory
-Session = scoped_session(sessionmaker(bind=engine))
+# Get the web_app directory path
+WEB_APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Database URL - use web_app/db.db
+db_path = os.path.join(WEB_APP_DIR, 'db.db')
+logger.info(f"Using database at: {db_path}")
+db_url = f"sqlite:///{db_path}?timeout=30&check_same_thread=False"
+
+# Create engine with connection pooling and timeout
+engine = create_engine(
+    db_url,
+    poolclass=QueuePool,
+    pool_size=20,
+    max_overflow=0,
+    pool_timeout=30,
+    connect_args={
+        'timeout': 30,
+        'check_same_thread': False
+    }
+)
+
+# Create scoped session factory
+Session = scoped_session(sessionmaker(
+    bind=engine,
+    expire_on_commit=False  # Don't expire objects after commit
+))
 
 @contextmanager
 def get_db():
-    """Get a database session using a context manager.
-    
-    Usage:
-        with get_db() as db:
-            result = db.query(Metrics).all()
-            # session is automatically closed after the with block
-    """
+    """Get a database session with proper resource management"""
     session = Session()
     try:
         yield session
         session.commit()
-    except:
+    except Exception as e:
         session.rollback()
+        logger.error(f"Database error: {e}")
         raise
     finally:
         session.close()
-        Session.remove()
+        Session.remove()  # Remove session from registry
 
 def init_db():
-    """Initialize the database, creating only missing tables"""
+    """Initialize database, creating tables only if they don't exist"""
     try:
-        # Create tables if they don't exist
-        Base.metadata.create_all(bind=engine)
-        logging.info("Database tables verified/created successfully")
+        # Create tables only if they don't exist
+        Base.metadata.create_all(engine)
+        
+        # Verify we can connect
+        with get_db() as db:
+            db.execute(text('SELECT 1'))
+            logger.info("Database connection verified successfully")
     except Exception as e:
-        logging.error(f"Error initializing database: {e}")
+        logger.error(f"Error initializing database: {e}")
         raise
-
-# Alias get_db as get_session for compatibility
-get_session = get_db

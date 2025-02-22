@@ -1,13 +1,12 @@
 import psutil
 from typing import List
-from ..base_device import BaseDevice
-from ...models.metric_dto import MetricDTO
+from ..base_device import BaseDevice, MetricDTO
 
 class LocalMetricsService(BaseDevice):
     def __init__(self, base_url: str, poll_interval: int):
         super().__init__(
             device_name="local",
-            metric_type="SystemMetrics",  # Base type, individual metrics will have their own types
+            metric_type="local",  # Use consistent type for the device
             base_url=base_url,
             poll_interval=poll_interval
         )
@@ -32,6 +31,7 @@ class LocalMetricsService(BaseDevice):
         
     def create_metric_with_type(self, specific_type: str, value: float) -> MetricDTO:
         """Create a metric with a specific type"""
-        metric = self.create_metric(value)
-        metric.type = specific_type
+        metric = MetricDTO(type=specific_type, value=value)
+        if self.uuid:
+            metric.uuid = self.uuid
         return metric

@@ -12,3 +12,7 @@ I think all my data is sent every tick, should it only be sent when we access th
 
 
 Should caching be on client or server side?
+
+
+Should it be one big databse table or many smaller, in terms of flexibility
+should it be sent as two different requests, one for local metrics and one for api??

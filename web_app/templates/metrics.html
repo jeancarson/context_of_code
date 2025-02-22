@@ -83,18 +83,17 @@
     <div class="container">
         <h2 class="mb-4">System Metrics</h2>
         {% if remote_metrics %}
-            {% for machine_id, metrics in remote_metrics.items() %}
+            {% for device_id, data in remote_metrics.items() %}
                 <a href="#" class="box">
-                    <h3>Machine: {{ machine_id }}</h3>
-                    <p>Last Updated: {{ metrics.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</p>
-                    <p>CPU Usage: {{ "%.1f"|format(metrics.cpu_percent) }}%</p>
-                    <p>Memory Usage: {{ "%.1f"|format(metrics.memory_percent) }}%</p>
-                    <p>Memory Available: {{ "%.1f"|format(metrics.memory_available_gb) }} GB</p>
-                    <p>Total Memory: {{ "%.1f"|format(metrics.memory_total_gb) }} GB</p>
+                    <h3>Device: {{ device_id }}</h3>
+                    <p>Last Updated: {{ data.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+                    {% for metric_name, value in data.metrics.items() %}
+                        <p>{{ metric_name }}: {{ "%.2f"|format(value) }}</p>
+                    {% endfor %}
                 </a>
             {% endfor %}
         {% else %}
-            <p class="no-data">No remote machines connected yet.</p>
+            <p class="no-data">No metrics available yet.</p>
         {% endif %}
 
         {% if fortune %}

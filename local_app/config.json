@@ -3,7 +3,7 @@
         "base_url": "http://localhost:5000"
     },
     "intervals": {
-        "metrics": 20,
+        "local": 20,
         "temperature": 3600,
         "exchange_rate": 3600
     },
@@ -23,16 +23,6 @@
             "filename": "local_app.log",
             "max_bytes": 10485760,
             "backup_count": 5
-        }
-    },
-    "country": {
-        "code": "GB",
-        "name": "United Kingdom",
-        "currency": "GBP",
-        "capital": {
-            "name": "London",
-            "lat": 51.5074,
-            "lon": -0.1278
         }
     }
 }
