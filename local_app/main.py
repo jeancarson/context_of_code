@@ -22,6 +22,7 @@ class Application:
         self._setup_devices()
         self._running = True
         self._event_loop = None
+        self._metrics_queue = []  # Queue to store metrics before sending
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
@@ -31,6 +32,9 @@ class Application:
         try:
             with open(config_path, 'r') as f:
                 self.config = json.load(f)
+            # Add a send interval if not present
+            if 'send_interval' not in self.config['intervals']:
+                self.config['intervals']['send'] = 30  # Default 30 seconds
             logger.info(f"Loaded configuration from {config_path}")
         except Exception as e:
             logger.error(f"Error loading config from {config_path}: {e}")
@@ -62,35 +66,39 @@ class Application:
             logger.error(f"Error setting up devices: {e}")
             sys.exit(1)
 
-    def _cleanup(self):
-        """Cleanup resources"""
-        logger.info("Shutting down application...")
-        if self._event_loop:
-            self._event_loop.close()
+    async def collect_service_metrics(self, service, interval):
+        """Collect metrics from a specific service on its own interval"""
+        while self._running:
+            try:
+                metrics = service.get_current_metrics()
+                if metrics:
+                    self._metrics_queue.extend(metrics)
+                    logger.info(f"Added {len(metrics)} metrics from {service.__class__.__name__} to queue")
+                await asyncio.sleep(interval)
+            except Exception as e:
+                logger.error(f"Error collecting metrics from {service.__class__.__name__}: {str(e)}")
+                if hasattr(e, '__traceback__'):
+                    import traceback
+                    logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+                await asyncio.sleep(1)
 
-    def _handle_signal(self, signum, frame):
-        """Handle termination signals"""
-        logger.info("Received signal %d, shutting down...", signum)
-        self._running = False
-
-    async def collect_metrics(self):
-        """Collect metrics from all devices"""
-        try:
-            metrics = []
-            # Get metrics from temperature service
-            metrics.extend(self.temperature_service.get_current_metrics())
-            # Get metrics from exchange rate service
-            metrics.extend(self.exchange_rate_service.get_current_metrics())
-            # Get metrics from local metrics service
-            metrics.extend(self.local_metrics_service.get_current_metrics())
-            
-            # Send metrics to server
-            await self.send_metrics(metrics)
-        except Exception as e:
-            logger.error(f"Error collecting metrics: {str(e)}")
-            if hasattr(e, '__traceback__'):
-                import traceback
-                logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+    async def send_metrics_task(self):
+        """Task to send queued metrics on a fixed interval"""
+        while self._running:
+            try:
+                if self._metrics_queue:
+                    logger.info(f"Sending {len(self._metrics_queue)} metrics from queue")
+                    await self.send_metrics(self._metrics_queue)
+                    self._metrics_queue = []  # Clear the queue after sending
+                else:
+                    logger.info("No metrics in queue to send")
+                await asyncio.sleep(self.config['intervals']['send'])
+            except Exception as e:
+                logger.error(f"Error in send_metrics_task: {str(e)}")
+                if hasattr(e, '__traceback__'):
+                    import traceback
+                    logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+                await asyncio.sleep(1)
 
     async def send_metrics(self, metrics: List[MetricDTO]):
         """Send metrics to server"""
@@ -171,23 +179,42 @@ class Application:
     async def run_async(self):
         """Async main loop"""
         logger.info("Starting async loop...")
-        while self._running:
-            try:
-                logger.info("Collecting metrics...")
-                await self.collect_metrics()
-                interval = min(
-                    self.config['intervals']['local'],
-                    self.config['intervals']['exchange_rate'],
+        try:
+            # Create tasks for each service
+            tasks = [
+                self.collect_service_metrics(
+                    self.temperature_service,
                     self.config['intervals']['temperature']
-                )
-                logger.info(f"Sleeping for {interval} seconds...")
-                await asyncio.sleep(interval)
-            except Exception as e:
-                logger.error(f"Error in async loop: {str(e)}")
-                if hasattr(e, '__traceback__'):
-                    import traceback
-                    logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
-                await asyncio.sleep(1)
+                ),
+                self.collect_service_metrics(
+                    self.exchange_rate_service,
+                    self.config['intervals']['exchange_rate']
+                ),
+                self.collect_service_metrics(
+                    self.local_metrics_service,
+                    self.config['intervals']['local']
+                ),
+                self.send_metrics_task()
+            ]
+            
+            # Run all tasks concurrently
+            await asyncio.gather(*tasks)
+        except Exception as e:
+            logger.error(f"Error in run_async: {str(e)}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+
+    def _cleanup(self):
+        """Cleanup resources"""
+        logger.info("Shutting down application...")
+        if self._event_loop:
+            self._event_loop.close()
+
+    def _handle_signal(self, signum, frame):
+        """Handle termination signals"""
+        logger.info("Received signal %d, shutting down...", signum)
+        self._running = False
 
     def run(self):
         """Main application loop"""
