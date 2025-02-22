@@ -1,19 +1,18 @@
-from dataclasses import dataclass
-from typing import Optional
-from uuid import UUID
+from pydantic import BaseModel
+from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal
 
-@dataclass
-class MetricDTO:
-    type: str  # e.g., "GPBtoEURexchangeRate", "RAMPercent", "Temperature"
+class MetricDTO(BaseModel):
+    """Data transfer object for metrics"""
+    type: str
     value: float
-    uuid: Optional[UUID] = None  # Device UUID
-    timestamp: Optional[float] = None  # Unix timestamp
+    device_id: Optional[str] = None  # UUID as hex string
+    created_at: Optional[str] = None
 
-@dataclass
-class MetricsRequest:
-    metrics: list[MetricDTO]  # List of metrics to store
+class MetricsRequest(BaseModel):
+    """Request containing a list of metrics"""
+    metrics: List[MetricDTO]
 
 def convert_to_orm(metric: MetricDTO, device_id: int, type_id: int) -> 'Metrics':
     """Convert a MetricDTO to an ORM Metrics object"""
@@ -23,5 +22,5 @@ def convert_to_orm(metric: MetricDTO, device_id: int, type_id: int) -> 'Metrics'
         device=device_id,
         type=type_id,
         value=Decimal(str(metric.value)),  # Convert float to Decimal for precision
-        timestamp=str(datetime.fromtimestamp(metric.timestamp)) if metric.timestamp else str(datetime.now())
+        created_at=metric.created_at if metric.created_at else str(datetime.now())
     )

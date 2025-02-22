@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 import datetime
 import decimal

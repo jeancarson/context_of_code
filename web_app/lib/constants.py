@@ -6,7 +6,15 @@ class HTTPMethod(str, Enum):
     PUT = "PUT"
     DELETE = "DELETE"
 
-class StatusCode(int, Enum):
+class StatusCode(str, Enum):
+    """Status codes for API responses"""
+    OK = "OK"
+    ERROR = "ERROR"
+    NOT_FOUND = "NOT_FOUND"
+    BAD_REQUEST = "BAD_REQUEST"
+
+class HTTPStatusCode(int, Enum):
+    """HTTP status codes"""
     OK = 200
     CREATED = 201
     NO_CONTENT = 204

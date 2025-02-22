@@ -1,18 +1,21 @@
 import os
+import uuid
+import datetime
 from flask import Flask, jsonify, send_from_directory, request, render_template
 from lib.config import Config
 import logging
 from lib.database import init_db, get_db
-from lib.constants import StatusCode
-import datetime
-from sqlalchemy import select, func, and_, desc
+from lib.models.generated_models import Devices, MetricTypes, Metrics
+from lib.constants import StatusCode, HTTPStatusCode
+from sqlalchemy import select, func, and_, desc, text
 import sys
-import uuid
 from lib.models.dto import MetricDTO, MetricsRequest, convert_to_orm
-
-# Import models from generated_models
-from lib.models.generated_models import (
-    Base, Metrics, Visits, Devices, MetricTypes
+from typing import Optional
+from lib.services.orm_service import (
+    get_all_devices,
+    get_all_metric_types,
+    get_recent_metrics,
+    get_all_visits
 )
 
 # Compute root directory once and use it throughout the file
@@ -51,7 +54,7 @@ def get_latest_metrics():
                             'device_id': str(metric.device),  # Just use the ID for now
                             'type': str(metric.type),  # Just use the ID for now
                             'value': float(metric.value),
-                            'timestamp': metric.timestamp
+                            'created_at': metric.created_at
                         })
                     except Exception as e:
                         logger.error(f"Error formatting metric {metric.id}: {e}")
@@ -104,60 +107,116 @@ def metrics_page():
         remote_metrics=get_latest_metrics()
     )
 
-@app.route("/api/metrics", methods=["POST"])
-def store_metrics():
-    """Store metrics received from devices"""
-    if not request.is_json:
-        return jsonify({"error": "Content-Type must be application/json"}), StatusCode.BAD_REQUEST
-    
+@app.route("/api/device/register", methods=["POST"])
+def register_device():
+    """Register a new device and return its UUID"""
     try:
-        data = request.get_json()
-        metrics_request = MetricsRequest(
-            metrics=[
-                MetricDTO(
-                    type=m["type"],
-                    value=float(m["value"]),
-                    uuid=uuid.UUID(m["uuid"]) if m["uuid"] else None,
-                    timestamp=m["timestamp"]
-                ) for m in data["metrics"]
-            ]
+        device_uuid = uuid.uuid4()
+        device = Devices(
+            uuid=device_uuid.hex,
+            created_at=str(datetime.datetime.now())
         )
         
         with get_db() as db:
-            for metric in metrics_request.metrics:
-                # Skip metrics without device UUID
-                if not metric.uuid:
-                    logger.warning(f"Skipping metric without UUID: {metric}")
-                    continue
-                    
-                # Get or create device
-                device_bytes = metric.uuid.bytes
-                device = db.query(Devices).filter(Devices.uuid == device_bytes).first()
-                if not device:
-                    device = Devices(uuid=device_bytes)
-                    db.add(device)
-                    db.flush()  # Get the device ID
-                    
-                # Get or create metric type
-                metric_type = db.query(MetricTypes).filter(MetricTypes.type == metric.type).first()
-                if not metric_type:
-                    metric_type = MetricTypes(type=metric.type)
-                    db.add(metric_type)
-                    db.flush()  # Get the type ID
-                
-                # Create and store the metric
-                orm_metric = convert_to_orm(metric, device.id, metric_type.id)
-                db.add(orm_metric)
-            
+            db.add(device)
             db.commit()
             
-        return jsonify({"status": "success"}), StatusCode.CREATED
-        
-    except (KeyError, ValueError) as e:
-        return jsonify({"error": f"Invalid data format: {str(e)}"}), StatusCode.BAD_REQUEST
+        return jsonify({
+            'status': StatusCode.OK.value,
+            'device_id': device_uuid.hex
+        })
     except Exception as e:
-        logger.error(f"Error storing metrics: {e}")
-        return jsonify({"error": "Internal server error"}), StatusCode.INTERNAL_SERVER_ERROR
+        logger.error(f"Error registering device: {e}")
+        return jsonify({
+            'error': str(e),
+            'status': StatusCode.ERROR.value
+        }), HTTPStatusCode.INTERNAL_SERVER_ERROR.value
+
+def get_or_create_metric_type(db, type_name: str) -> MetricTypes:
+    """Get or create a metric type by name"""
+    metric_type = db.query(MetricTypes).filter(MetricTypes.type == type_name).first()
+    if not metric_type:
+        metric_type = MetricTypes(
+            type=type_name,
+            created_at=datetime.datetime.now()
+        )
+        db.add(metric_type)
+        db.commit()
+    return metric_type
+
+def get_device_by_uuid(db, uuid_hex: str) -> Optional[Devices]:
+    """Get a device by its UUID hex string"""
+    try:
+        return db.query(Devices).filter(Devices.uuid == uuid_hex).first()
+    except Exception as e:
+        logger.error(f"Error finding device with UUID {uuid_hex}: {e}")
+        return None
+
+@app.route("/api/metrics", methods=['POST'])
+def store_metrics():
+    """Store metrics received from devices"""
+    try:
+        if not request.is_json:
+            return jsonify({
+                'error': 'Invalid content type',
+                'status': StatusCode.BAD_REQUEST.value
+            }), HTTPStatusCode.BAD_REQUEST.value
+
+        metrics_request = MetricsRequest(**request.json)
+        
+        with get_db() as db:
+            for metric_dto in metrics_request.metrics:
+                try:
+                    # Get or create metric type
+                    metric_type = get_or_create_metric_type(db, metric_dto.type)
+                    if not metric_type:
+                        logger.error(f"Failed to get/create metric type: {metric_dto.type}")
+                        continue
+
+                    # Get device by UUID
+                    device = get_device_by_uuid(db, metric_dto.device_id)
+                    if not device:
+                        return jsonify({
+                            'error': f'Device not found: {metric_dto.device_id}',
+                            'status': StatusCode.NOT_FOUND.value
+                        }), HTTPStatusCode.NOT_FOUND.value
+                    
+                    # Create metric
+                    metric = Metrics(
+                        device=device.id,
+                        type=metric_type.id,  # Use the ID of the metric type
+                        value=metric_dto.value,
+                        created_at=metric_dto.created_at
+                    )
+                    db.add(metric)
+                
+                except Exception as e:
+                    logger.error(f"Error storing metric: {e}")
+                    return jsonify({
+                        'error': str(e),
+                        'status': StatusCode.ERROR.value
+                    }), HTTPStatusCode.INTERNAL_SERVER_ERROR.value
+            
+            db.commit()
+            return jsonify({'status': StatusCode.OK.value})
+            
+    except Exception as e:
+        logger.error(f"Error processing metrics request: {e}")
+        return jsonify({
+            'error': str(e),
+            'status': StatusCode.ERROR.value
+        }), HTTPStatusCode.INTERNAL_SERVER_ERROR.value
+
+@app.route("/debug")
+def debug():
+    """Debug view showing all database tables"""
+    return render_template(
+        "debug.html",
+        devices=get_all_devices(),
+        metric_types=get_all_metric_types(),
+        metrics=get_recent_metrics(limit=50),
+        visits=get_all_visits()
+    )
 
 @app.route("/static/<path:path>")
 def send_static(path):

@@ -7,7 +7,9 @@ import json
 from typing import List
 from pathlib import Path
 import requests
-
+import asyncio
+import aiohttp
+from datetime import datetime
 from devices.temperature.service import TemperatureService
 from devices.exchange_rate.service import ExchangeRateService
 from devices.local.service import LocalMetricsService
@@ -38,82 +40,148 @@ class Application:
         """Initialize device services"""
         base_url = self.config['api']['base_url']
         
+        # Initialize devices one at a time to avoid database locks
+        logger.info("Initializing temperature service...")
         self.temperature_service = TemperatureService(
             base_url=base_url,
             poll_interval=self.config['intervals']['temperature']
         )
         
+        logger.info("Initializing exchange rate service...")
         self.exchange_rate_service = ExchangeRateService(
             base_url=base_url,
             poll_interval=self.config['intervals']['exchange_rate']
         )
         
+        logger.info("Initializing local metrics service...")
         self.local_metrics_service = LocalMetricsService(
             base_url=base_url,
-            poll_interval=self.config['intervals']['metrics']
+            poll_interval=self.config['intervals']['local']
         )
+        
+        self.devices = [
+            self.temperature_service,
+            self.exchange_rate_service,
+            self.local_metrics_service
+        ]
+        logger.info("All devices initialized successfully")
 
     def _handle_signal(self, signum, frame):
         """Handle termination signals"""
         logger.info("Received signal %d, shutting down...", signum)
         self._running = False
 
-    def collect_metrics(self) -> List[MetricDTO]:
+    async def collect_metrics(self):
         """Collect metrics from all devices"""
-        metrics = []
+        try:
+            metrics = []
+            # Get metrics from temperature service
+            metrics.extend(self.temperature_service.get_current_metrics())
+            # Get metrics from exchange rate service
+            metrics.extend(self.exchange_rate_service.get_current_metrics())
+            # Get metrics from local metrics service
+            metrics.extend(self.local_metrics_service.get_current_metrics())
+            
+            # Send metrics to server
+            await self.send_metrics(metrics)
+        except Exception as e:
+            logger.error(f"Error collecting metrics: {str(e)}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+
+    async def send_metrics(self, metrics: List[MetricDTO]):
+        """Send metrics to server"""
+        try:
+            metrics_to_send = []
+            for metric in metrics:
+                device_id = await self.get_device_id(metric.type)
+                if not device_id:
+                    logger.error(f"No device ID for metric type {metric.type}")
+                    continue
+                
+                # Remove dashes from UUID to match database format
+                device_id = device_id.replace('-', '')
+                
+                metrics_to_send.append({
+                    "type": metric.type,
+                    "value": metric.value,
+                    "device_id": device_id,
+                    "created_at": str(datetime.now())
+                })
+            
+            if not metrics_to_send:
+                logger.error("No metrics to send - all device IDs missing")
+                return
+            
+            # Send metrics to server
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{self.config['api']['base_url']}/api/metrics",
+                        json={"metrics": metrics_to_send}
+                    ) as response:
+                        if response.status != 200:
+                            logger.error(f"Error sending metrics: {response.status}")
+                            data = await response.json()
+                            logger.error(f"Server response: {data}")
+                            if response.status == 500:
+                                logger.error(f"Request data that caused error: {metrics_to_send}")
+                        else:
+                            logger.debug(f"Successfully sent {len(metrics_to_send)} metrics")
+            except Exception as e:
+                logger.error(f"Error sending metrics to server: {str(e)}")
+                if hasattr(e, '__traceback__'):
+                    import traceback
+                    logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+        except Exception as e:
+            logger.error(f"Error preparing metrics to send: {str(e)}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+
+    async def get_device_id(self, metric_type: str) -> str:
+        """Get device ID for metric type, using the appropriate device's UUID"""
+        # Map metric types to their devices
+        device_map = {
+            'Temperature': self.temperature_service,
+            'GPBtoEURexchangeRate': self.exchange_rate_service,
+            'CPUPercent': self.local_metrics_service,
+            'RAMPercent': self.local_metrics_service,
+            'DiskPercent': self.local_metrics_service,
+            'local': self.local_metrics_service  # Add mapping for local device type
+        }
         
-        # Temperature metric
-        temp = self.temperature_service.get_current_temperature()
-        metrics.append(self.temperature_service.create_metric(temp))
-        
-        # Exchange rate metric
-        rate = self.exchange_rate_service.get_current_rate()
-        metrics.append(self.exchange_rate_service.create_metric(rate))
-        
-        # Local system metrics
-        metrics.extend(self.local_metrics_service.get_current_metrics())
-        
-        return metrics
+        device = device_map.get(metric_type)
+        if not device:
+            logger.error(f"No device found for metric type: {metric_type}")
+            return None
+            
+        # Use the device's UUID directly
+        if device.uuid:
+            return str(device.uuid)
+            
+        logger.error(f"Device {device.device_name} has no UUID")
+        return None
 
     def run(self):
         """Main application loop"""
+        logger.info("Starting application...")
         try:
             while self._running:
                 try:
-                    metrics = self.collect_metrics()
-                    
-                    # Send metrics to server
-                    try:
-                        response = requests.post(
-                            f"{self.config['api']['base_url']}/api/metrics",
-                            json={
-                                "metrics": [
-                                    {
-                                        "type": m.type,
-                                        "value": m.value,
-                                        "uuid": str(m.uuid) if m.uuid else None,
-                                        "timestamp": m.timestamp
-                                    } for m in metrics
-                                ]
-                            }
-                        )
-                        response.raise_for_status()
-                        logger.info(f"Successfully sent {len(metrics)} metrics to server")
-                    except Exception as e:
-                        logger.error(f"Failed to send metrics to server: {e}")
-                    
-                    time.sleep(min(
-                        self.config['intervals']['metrics'],
-                        self.config['intervals']['temperature'],
-                        self.config['intervals']['exchange_rate']
-                    ))
+                    asyncio.run(self.collect_metrics())
                 except Exception as e:
-                    logger.error(f"Error collecting metrics: {e}")
-                    time.sleep(5)  # Wait before retrying
+                    logger.error(f"Error in main loop: {str(e)}")
+                    if hasattr(e, '__traceback__'):
+                        import traceback
+                        logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
                 
-        except Exception as e:
-            logger.error("Error in main loop: %s", e)
-            
+                time.sleep(min(
+                    self.config['intervals']['metrics'],
+                    self.config['intervals']['exchange_rate'],
+                    self.config['intervals']['temperature']
+                ))
         finally:
             self._cleanup()
 

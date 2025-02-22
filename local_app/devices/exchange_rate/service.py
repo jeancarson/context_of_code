@@ -1,7 +1,7 @@
 import os
 import requests
-from typing import Optional
-from ..base_device import BaseDevice
+from typing import Optional, List
+from ..base_device import BaseDevice, MetricDTO
 
 class ExchangeRateService(BaseDevice):
     def __init__(self, base_url: str, poll_interval: int):
@@ -29,3 +29,9 @@ class ExchangeRateService(BaseDevice):
             self.logger.error(f"Error fetching exchange rate: {e}")
             # Return a reasonable default if API fails
             return 1.15
+            
+    def get_current_metrics(self) -> List[MetricDTO]:
+        """Get current metrics"""
+        rate = self.get_current_rate()
+        metric = self.create_metric(rate)
+        return [metric]

@@ -3,7 +3,7 @@
         "base_url": "http://localhost:5000"
     },
     "intervals": {
-        "metrics": 20,
+        "local": 20,
         "temperature": 3600,
         "exchange_rate": 3600
     },

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug View</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .debug-container {
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .table-container {
+            margin-bottom: 30px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+        tr:hover {
+            background-color: #f9f9f9;
+        }
+        h2 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+        .refresh-button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+        .refresh-button:hover {
+            background-color: #45a049;
+        }
+        .empty-table {
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="debug-container">
+        <button class="refresh-button" onclick="window.location.reload()">Refresh Data</button>
+
+        <div class="table-container">
+            <h2>Devices</h2>
+            {% if devices %}
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>UUID</th>
+                    <th>Created At</th>
+                    <th>Metric Count</th>
+                </tr>
+                {% for device in devices %}
+                <tr>
+                    <td>{{ device.id }}</td>
+                    <td>{{ device.uuid }}</td>
+                    <td>{{ device.created_at }}</td>
+                    <td>{{ device.metric_count }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <div class="empty-table">No devices registered</div>
+            {% endif %}
+        </div>
+
+        <div class="table-container">
+            <h2>Metric Types</h2>
+            {% if metric_types %}
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>Type</th>
+                    <th>Created At</th>
+                    <th>Metric Count</th>
+                </tr>
+                {% for type in metric_types %}
+                <tr>
+                    <td>{{ type.id }}</td>
+                    <td>{{ type.type }}</td>
+                    <td>{{ type.created_at }}</td>
+                    <td>{{ type.metric_count }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <div class="empty-table">No metric types defined</div>
+            {% endif %}
+        </div>
+
+        <div class="table-container">
+            <h2>Recent Metrics</h2>
+            {% if metrics %}
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>Device UUID</th>
+                    <th>Type</th>
+                    <th>Value</th>
+                    <th>Created At</th>
+                    <th>Timestamp</th>
+                </tr>
+                {% for metric in metrics %}
+                <tr>
+                    <td>{{ metric.id }}</td>
+                    <td>{{ metric.device_uuid }}</td>
+                    <td>{{ metric.type }}</td>
+                    <td>{{ "%.2f"|format(metric.value) }}</td>
+                    <td>{{ metric.created_at }}</td>
+                    <td>{{ metric.timestamp }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <div class="empty-table">No metrics collected</div>
+            {% endif %}
+        </div>
+
+        <div class="table-container">
+            <h2>Visits</h2>
+            {% if visits %}
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>IP Address</th>
+                    <th>Visit Count</th>
+                    <th>Last Visit</th>
+                </tr>
+                {% for visit in visits %}
+                <tr>
+                    <td>{{ visit.id }}</td>
+                    <td>{{ visit.ip_address }}</td>
+                    <td>{{ visit.count }}</td>
+                    <td>{{ visit.last_visit }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <div class="empty-table">No visits recorded</div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

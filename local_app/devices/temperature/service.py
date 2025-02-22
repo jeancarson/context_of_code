@@ -1,20 +1,22 @@
 import os
 import requests
-from typing import Optional
-from ..base_device import BaseDevice
+from typing import Optional, List
+from ..base_device import BaseDevice, MetricDTO
+import time
 
 class TemperatureService(BaseDevice):
     def __init__(self, base_url: str, poll_interval: int):
         super().__init__(
-            device_name="LondonTemperature",
-            metric_type="LondonTemperature",
+            device_name="Temperature",
+            metric_type="Temperature",
             base_url=base_url,
             poll_interval=poll_interval
         )
+        self.city = "London"
         
     def get_current_temperature(self) -> float:
         """Get current temperature in London using WeatherAPI"""
-        url = "https://wttr.in/London?format=j1"
+        url = f"https://wttr.in/{self.city}?format=j1"
         
         try:
             response = requests.get(url)
@@ -26,6 +28,27 @@ class TemperatureService(BaseDevice):
             return round(temp, 2)
             
         except Exception as e:
-            self.logger.error(f"Error fetching temperature: {e}")
+            self.logger.error(f"Error fetching temperature for {self.city}: {e}")
             # Return a reasonable default if API fails
             return 20.0
+            
+    def get_current_metrics(self) -> List[MetricDTO]:
+        """Get current metrics"""
+        temperature = self.get_current_temperature()
+        metric = self.create_metric(temperature)
+        return [metric]
+        
+    def run(self):
+        """Run the temperature service"""
+        while self._running:
+            try:
+                temperature = self.get_current_temperature()
+                metric = self.create_metric(temperature)
+                metric.type = "Temperature"  # Use the same type as the device
+                
+                self.publish_metrics([metric])
+                
+            except Exception as e:
+                self.logger.error(f"Error in temperature service: {e}")
+                
+            time.sleep(self.poll_interval)

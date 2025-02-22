@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import uuid
+import requests
 from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ class MetricDTO:
     type: str  # e.g., "GPBtoEURexchangeRate", "RAMPercent", "Temperature"
     value: float
     uuid: Optional[UUID] = None  # Will be None if not yet assigned
-    timestamp: Optional[float] = None  # Will be set by the service before sending
+    created_at: Optional[float] = None  # Will be set by the service before sending
 
 class BaseDevice:
     def __init__(self, device_name: str, metric_type: str, base_url: str, poll_interval: int):
@@ -27,7 +28,7 @@ class BaseDevice:
         self._load_or_request_uuid()
 
     def _load_or_request_uuid(self):
-        """Load UUID from guid file or request a new one"""
+        """Load UUID from guid file or request a new one from server"""
         guid_path = Path(os.path.dirname(__file__)) / self.device_name / "guid"
         
         if guid_path.exists():
@@ -35,13 +36,25 @@ class BaseDevice:
                 self.uuid = uuid.UUID(f.read().strip())
             logger.info(f"Loaded existing UUID for {self.device_name}: {self.uuid}")
         else:
-            # TODO: Implement the getUUID request to server
-            # For now, we'll just create a new one locally
-            self.uuid = uuid.uuid4()
-            guid_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(guid_path, "w") as f:
-                f.write(str(self.uuid))
-            logger.info(f"Created new UUID for {self.device_name}: {self.uuid}")
+            try:
+                # Request new UUID from server
+                response = requests.post(f"{self.base_url}/api/device/register")
+                if response.status_code == 200:
+                    data = response.json()
+                    if data['status'] == 'OK':
+                        self.uuid = uuid.UUID(data['device_id'])
+                        # Save the UUID
+                        guid_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(guid_path, "w") as f:
+                            f.write(str(self.uuid))
+                        logger.info(f"Registered new UUID for {self.device_name}: {self.uuid}")
+                    else:
+                        raise Exception(f"Server returned error status: {data.get('error', data['status'])}")
+                else:
+                    raise Exception(f"Server returned status code: {response.status_code}")
+            except Exception as e:
+                logger.error(f"Error registering device {self.device_name}: {e}")
+                raise
 
     def create_metric(self, value: float) -> MetricDTO:
         """Create a metric DTO with the current timestamp"""
@@ -49,5 +62,40 @@ class BaseDevice:
             type=self.metric_type,
             value=value,
             uuid=self.uuid,
-            timestamp=time.time()
+            created_at=time.time()
         )
+
+    def publish_metrics(self, metrics: list[MetricDTO]):
+        """Publish metrics to the server"""
+        if not self.uuid:
+            raise Exception(f"No device ID for service {self.metric_type}")
+            
+        try:
+            payload = {
+                "metrics": [
+                    {
+                        "type": metric.type,
+                        "value": metric.value,
+                        "device_id": str(self.uuid),
+                        "created_at": metric.created_at
+                    }
+                    for metric in metrics
+                ]
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/api/metrics",
+                json=payload
+            )
+            
+            if response.status_code != 200:
+                error_data = response.json()
+                logger.error(f"Error publishing metrics: {response.status_code} - {error_data.get('error', 'Unknown error')}")
+                return
+                
+            data = response.json()
+            if data['status'] != 'OK':
+                logger.error(f"Error publishing metrics: {data.get('error', data['status'])}")
+            
+        except Exception as e:
+            logger.error(f"Error publishing metrics: {e}")
