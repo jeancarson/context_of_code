@@ -6,6 +6,7 @@ import time
 import json
 from typing import List
 from pathlib import Path
+import requests
 
 from devices.temperature.service import TemperatureService
 from devices.exchange_rate.service import ExchangeRateService
@@ -80,10 +81,26 @@ class Application:
             while self._running:
                 try:
                     metrics = self.collect_metrics()
-                    # TODO: Send metrics to server
-                    # For now just log them
-                    for metric in metrics:
-                        logger.info(f"Collected metric: {metric}")
+                    
+                    # Send metrics to server
+                    try:
+                        response = requests.post(
+                            f"{self.config['api']['base_url']}/api/metrics",
+                            json={
+                                "metrics": [
+                                    {
+                                        "type": m.type,
+                                        "value": m.value,
+                                        "uuid": str(m.uuid) if m.uuid else None,
+                                        "timestamp": m.timestamp
+                                    } for m in metrics
+                                ]
+                            }
+                        )
+                        response.raise_for_status()
+                        logger.info(f"Successfully sent {len(metrics)} metrics to server")
+                    except Exception as e:
+                        logger.error(f"Failed to send metrics to server: {e}")
                     
                     time.sleep(min(
                         self.config['intervals']['metrics'],
