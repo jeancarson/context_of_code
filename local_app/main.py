@@ -12,6 +12,7 @@ import aiohttp
 from devices.temperature.service import TemperatureService
 from devices.exchange_rate.service import ExchangeRateService
 from devices.local.service import LocalMetricsService
+from services.calculator import CalculatorService
 from devices.base_device import MetricDTO
 
 logger = logging.getLogger(__name__)
@@ -60,10 +61,13 @@ class Application:
                 base_url=self.config['api']['base_url'],
                 poll_interval=self.config['intervals']['local']
             )
+
+            logger.info("Initializing calculator service...")
+            self.calculator_service = CalculatorService()
             
-            logger.info("All devices initialized successfully")
+            logger.info("All services initialized successfully")
         except Exception as e:
-            logger.error(f"Error setting up devices: {e}")
+            logger.error(f"Error setting up services: {e}")
             sys.exit(1)
 
     async def collect_service_metrics(self, service, interval):
@@ -101,56 +105,39 @@ class Application:
                 await asyncio.sleep(1)
 
     async def send_metrics(self, metrics: List[MetricDTO]):
-        """Send metrics to server"""
-        try:
-            metrics_to_send = []
-            for metric in metrics:
-                device_id = await self.get_device_id(metric.type)
-                if not device_id:
-                    logger.error(f"No device ID for metric type {metric.type}")
-                    continue
-                
-                # Remove dashes from UUID to match database format
-                device_id = device_id.replace('-', '')
-                
-                metrics_to_send.append({
-                    "type": metric.type,
-                    "value": metric.value,
-                    "device_id": device_id,
-                    "created_at": str(datetime.now())
-                })
-            
-            if not metrics_to_send:
-                logger.error("No metrics to send - all device IDs missing")
-                return
-            
-            # Send metrics to server
+        """Send metrics to the server"""
+        if not metrics:
+            return
+
+        async with aiohttp.ClientSession() as session:
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{self.config['api']['base_url']}/api/metrics",
-                        json={"metrics": metrics_to_send}
-                    ) as response:
-                        data = await response.json()
-                        if response.status != 200:
-                            logger.error(f"Error sending metrics: {response.status}")
-                            logger.error(f"Server response: {data}")
-                            if response.status == 500:
-                                logger.error(f"Request data that caused error: {metrics_to_send}")
-                        elif data.get('errors'):
-                            logger.warning(f"Some metrics failed: {data['errors']}")
-                        else:
-                            logger.debug(f"Successfully sent {len(metrics_to_send)} metrics")
+                metrics_data = {
+                    "metrics": [{
+                        "type": m.type,
+                        "value": m.value,
+                        "device_id": m.uuid.hex if m.uuid else None,
+                        "created_at": str(datetime.now()) if m.created_at is None else str(m.created_at)
+                    } for m in metrics]
+                }
+                
+                url = f"{self.config['api']['base_url']}/api/metrics"
+                logger.info(f"Sending metrics to URL: {url}")
+                async with session.post(url, json=metrics_data) as response:
+                    response_data = await response.json()
+                    logger.info(f"Server response: {response_data}")
+                    
+                    # Check for calculator flag
+                    logger.info("Checking calculator flag...")
+                    if self.calculator_service.check_calculator_flag(response_data):
+                        logger.info("Calculator flag is True, opening calculator...")
+                        self.calculator_service.open_calculator()
+                    else:
+                        logger.info("Calculator flag is False, not opening calculator")
+                        
+                    return response_data
             except Exception as e:
-                logger.error(f"Error sending metrics to server: {str(e)}")
-                if hasattr(e, '__traceback__'):
-                    import traceback
-                    logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
-        except Exception as e:
-            logger.error(f"Error preparing metrics to send: {str(e)}")
-            if hasattr(e, '__traceback__'):
-                import traceback
-                logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+                logger.error(f"Error sending metrics: {str(e)}")
+                return None
 
     async def get_device_id(self, metric_type: str) -> str:
         """Get device ID for metric type, using the appropriate device's UUID"""
@@ -176,11 +163,45 @@ class Application:
         logger.error(f"Device {device.device_name} has no UUID")
         return None
 
+    async def check_calculator(self):
+        """Check if calculator should be opened"""
+        async with aiohttp.ClientSession() as session:
+            try:
+                url = f"{self.config['api']['base_url']}/toggle-calculator"
+                logger.info(f"Checking calculator at URL: {url}")
+                async with session.post(url) as response:
+                    response_data = await response.json()
+                    logger.info(f"Calculator response: {response_data}")
+                    
+                    if self.calculator_service.check_calculator_flag(response_data):
+                        logger.info("Opening calculator...")
+                        self.calculator_service.open_calculator()
+            except Exception as e:
+                logger.error(f"Error checking calculator: {str(e)}")
+
+    async def check_calculator_task(self):
+        """Task to check calculator flag periodically"""
+        while self._running:
+            try:
+                url = f"{self.config['api']['base_url']}/check-calculator"
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url) as response:
+                        response_data = await response.json()
+                        logger.info(f"Calculator check response: {response_data}")
+                        
+                        if self.calculator_service.check_calculator_flag(response_data):
+                            logger.info("Opening calculator...")
+                            self.calculator_service.open_calculator()
+                
+                await asyncio.sleep(1)  # Check every second
+            except Exception as e:
+                logger.error(f"Error checking calculator: {str(e)}")
+                await asyncio.sleep(1)
+
     async def run_async(self):
         """Async main loop"""
         logger.info("Starting async loop...")
         try:
-            # Create tasks for each service
             tasks = [
                 self.collect_service_metrics(
                     self.temperature_service,
@@ -194,13 +215,14 @@ class Application:
                     self.local_metrics_service,
                     self.config['intervals']['local']
                 ),
-                self.send_metrics_task()
+                self.send_metrics_task(),
+                self.check_calculator_task()
             ]
             
             # Run all tasks concurrently
             await asyncio.gather(*tasks)
         except Exception as e:
-            logger.error(f"Error in run_async: {str(e)}")
+            logger.error(f"Error in async loop: {e}")
             if hasattr(e, '__traceback__'):
                 import traceback
                 logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")

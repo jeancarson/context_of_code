@@ -18,6 +18,7 @@ from lib.services.orm_service import (
     get_all_visits,
     get_latest_metrics_by_type
 )
+from lib.ip_service import IPService
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,10 +28,15 @@ logger = logging.getLogger(__name__)
 config = Config(os.path.join(ROOT_DIR, 'config.json'))
 config.setup_logging()
 
+# Initialize services
+ip_service = IPService()
+
 # Initialize Flask app with configuration
 app = Flask(__name__)
 app.config['DEBUG'] = config.debug
 app.config['SECRET_KEY'] = config.server.secret_key
+
+calculator_requested = False
 
 def get_client_ip():
     """Get the client's IP address"""
@@ -72,8 +78,14 @@ def hello():
     """Display the main dashboard"""
     client_ip = get_client_ip()
     visit_count = 1
+    location = None
     
     try:
+        # Get location info
+        location_data = ip_service.get_location(client_ip)
+        if location_data:
+            location = f"{location_data['city']}, {location_data['region']}, {location_data['country']}"
+        
         with get_db() as db:
             # Update visit count
             visit = db.query(Visits).filter(Visits.ip_address == client_ip).first()
@@ -95,7 +107,8 @@ def hello():
     return render_template(
         "index.html",
         remote_metrics=get_latest_metrics(),
-        visit_count=visit_count
+        visit_count=visit_count,
+        location=location if location else "Unknown Location"
     )
 
 @app.route("/metrics")
@@ -213,6 +226,23 @@ def store_metrics():
             'error': str(e),
             'status': StatusCode.ERROR.value
         }), HTTPStatusCode.INTERNAL_SERVER_ERROR.value
+
+@app.route("/toggle-calculator", methods=['POST'])
+def toggle_calculator():
+    """Toggle calculator flag for next response"""
+    global calculator_requested
+    calculator_requested = True
+    logger.info("Calculator request received")
+    return jsonify({"calculator_requested": True})
+
+@app.route("/check-calculator", methods=['POST'])
+def check_calculator():
+    """Check and reset calculator flag"""
+    global calculator_requested
+    was_requested = calculator_requested
+    calculator_requested = False  # Reset after checking
+    logger.info(f"Calculator check - was requested: {was_requested}")
+    return jsonify({"calculator_requested": was_requested})
 
 @app.route("/debug")
 def debug():
