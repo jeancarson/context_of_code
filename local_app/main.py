@@ -115,7 +115,7 @@ class Application:
                     "metrics": [{
                         "type": m.type,
                         "value": m.value,
-                        "device_id": str(m.uuid) if m.uuid else None,
+                        "device_id": m.uuid.hex if m.uuid else None,
                         "created_at": str(datetime.now()) if m.created_at is None else str(m.created_at)
                     } for m in metrics]
                 }
