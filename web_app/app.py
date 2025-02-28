@@ -32,6 +32,8 @@ app = Flask(__name__)
 app.config['DEBUG'] = config.debug
 app.config['SECRET_KEY'] = config.server.secret_key
 
+calculator_requested = False
+
 def get_client_ip():
     """Get the client's IP address"""
     if request.headers.getlist("X-Forwarded-For"):
@@ -213,6 +215,23 @@ def store_metrics():
             'error': str(e),
             'status': StatusCode.ERROR.value
         }), HTTPStatusCode.INTERNAL_SERVER_ERROR.value
+
+@app.route("/toggle-calculator", methods=['POST'])
+def toggle_calculator():
+    """Toggle calculator flag for next response"""
+    global calculator_requested
+    calculator_requested = True
+    logger.info("Calculator request received")
+    return jsonify({"calculator_requested": True})
+
+@app.route("/check-calculator", methods=['POST'])
+def check_calculator():
+    """Check and reset calculator flag"""
+    global calculator_requested
+    was_requested = calculator_requested
+    calculator_requested = False  # Reset after checking
+    logger.info(f"Calculator check - was requested: {was_requested}")
+    return jsonify({"calculator_requested": was_requested})
 
 @app.route("/debug")
 def debug():
