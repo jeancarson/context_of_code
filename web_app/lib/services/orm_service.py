@@ -1,112 +1,184 @@
+from sqlalchemy import select, func, and_, desc
+from sqlalchemy.orm import Session
+from ..models.generated_models import Devices, MetricTypes, MetricSnapshots, MetricValues, Visits, Aggregators
 from typing import List, Dict, Any
-from sqlalchemy import desc, func, and_
-from sqlalchemy.exc import IntegrityError
-from ..models.generated_models import Metrics, Devices, MetricTypes, Visits
-from ..database import get_db
+from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
 
-def get_all_devices() -> List[Dict[str, Any]]:
-    """Get all devices with their UUIDs"""
-    with get_db() as db:
-        devices = db.query(Devices).all()
-        return [
-            {
-                'id': device.id,
-                'uuid': device.uuid,  
-                'created_at': device.created_at,
-                'metric_count': len(device.metrics)
-            }
-            for device in devices
-        ]
+def get_all_devices(db: Session) -> List[Dict[str, Any]]:
+    """Get all devices with their aggregator info and metric counts"""
+    devices = (
+        db.query(
+            Devices,
+            Aggregators,
+            func.count(MetricValues.metric_snapshot_id).label('metric_count')
+        )
+        .outerjoin(Aggregators)
+        .outerjoin(MetricSnapshots)
+        .outerjoin(MetricValues)
+        .group_by(Devices.device_id)
+        .all()
+    )
 
-def get_all_metric_types() -> List[Dict[str, Any]]:
-    """Get all metric types"""
-    with get_db() as db:
-        types = db.query(MetricTypes).all()
-        return [
-            {
-                'id': type.id,
-                'type': type.type,
-                'created_at': type.created_at,
-                'metric_count': len(type.metrics)
-            }
-            for type in types
-        ]
+    return [{
+        'id': device.device_id,
+        'uuid': device.device_uuid,
+        'name': device.device_name,
+        'aggregator_name': aggregator.name if aggregator else None,
+        'aggregator_uuid': aggregator.aggregator_uuid if aggregator else None,
+        'created_at': device.created_at,
+        'metric_count': metric_count
+    } for device, aggregator, metric_count in devices]
 
-def get_recent_metrics(limit: int = 50) -> List[Dict[str, Any]]:
-    """Get most recent metrics with device and type information"""
-    with get_db() as db:
-        metrics = db.query(Metrics)\
-            .join(Devices)\
-            .join(MetricTypes)\
-            .order_by(desc(Metrics.created_at))\
-            .limit(limit)\
-            .all()
-        
-        return [
-            {
-                'id': metric.id,
-                'device_uuid': metric.devices.uuid,  
-                'type': metric.metric_types.type,
-                'value': float(metric.value),
-                'created_at': metric.created_at
-            }
-            for metric in metrics
-        ]
+def get_all_metric_types(db: Session) -> List[Dict[str, Any]]:
+    """Get all metric types with their metric counts"""
+    types = (
+        db.query(
+            MetricTypes,
+            func.count(MetricValues.metric_snapshot_id).label('metric_count')
+        )
+        .outerjoin(MetricValues)
+        .group_by(MetricTypes.metric_type_id)
+        .all()
+    )
+    
+    return [{
+        'id': type.metric_type_id,
+        'type': type.metric_type_name,
+        'device_id': type.device_id,
+        'created_at': type.created_at,
+        'metric_count': metric_count
+    } for type, metric_count in types]
 
-def get_all_visits() -> List[Dict[str, Any]]:
-    """Get all visits"""
-    with get_db() as db:
-        visits = db.query(Visits).order_by(desc(Visits.last_visit)).all()
-        return [
-            {
-                'id': visit.id,
-                'ip_address': visit.ip_address,
-                'count': visit.count,
-                'last_visit': visit.last_visit.isoformat() if visit.last_visit else None
-            }
-            for visit in visits
-        ]
+def get_recent_metrics(db: Session, limit: int = 100) -> List[Dict[str, Any]]:
+    """Get recent metrics with their types and devices"""
+    metrics = (
+        db.query(MetricSnapshots, Devices, MetricValues, MetricTypes)
+        .select_from(MetricSnapshots)
+        .join(
+            Devices,
+            Devices.device_id == MetricSnapshots.device_id
+        )
+        .join(
+            MetricValues,
+            MetricValues.metric_snapshot_id == MetricSnapshots.metric_snapshot_id
+        )
+        .join(
+            MetricTypes,
+            and_(
+                MetricTypes.metric_type_id == MetricValues.metric_type_id,
+                MetricTypes.device_id == Devices.device_id
+            )
+        )
+        .order_by(desc(MetricSnapshots.server_timestamp_utc))
+        .limit(limit)
+        .all()
+    )
+    
+    return [{
+        'device_uuid': device.device_uuid,
+        'device_name': device.device_name,
+        'metric_type': type.metric_type_name,
+        'value': float(value.value),
+        'timestamp': snapshot.server_timestamp_utc
+    } for snapshot, device, value, type in metrics]
 
-def get_latest_metrics_by_type():
-    """Get only the most recent metric for each type"""
+def get_all_visits(db: Session) -> List[Dict[str, Any]]:
+    """Get all visit records"""
+    visits = db.query(Visits).all()
+    return [{
+        'ip_address': visit.ip_address,
+        'count': visit.count,
+        'last_visit': visit.last_visit
+    } for visit in visits]
+
+def get_latest_metrics_by_type(db: Session, metric_type_name: str = None) -> List[Dict[str, Any]]:
+    """Get the most recent metric for each type"""
+    # First get a subquery of the latest snapshot for each metric type
+    latest_snapshots = (
+        db.query(
+            MetricTypes.metric_type_id,
+            func.max(MetricSnapshots.metric_snapshot_id).label('latest_snapshot_id')
+        )
+        .join(MetricValues, MetricValues.metric_type_id == MetricTypes.metric_type_id)
+        .join(MetricSnapshots, MetricSnapshots.metric_snapshot_id == MetricValues.metric_snapshot_id)
+        .group_by(MetricTypes.metric_type_id)
+        .subquery()
+    )
+    
+    # Then join this with our main tables to get the actual values
+    query = (
+        db.query(MetricSnapshots, Devices, MetricValues, MetricTypes)
+        .select_from(latest_snapshots)
+        .join(
+            MetricSnapshots,
+            MetricSnapshots.metric_snapshot_id == latest_snapshots.c.latest_snapshot_id
+        )
+        .join(
+            MetricValues,
+            and_(
+                MetricValues.metric_snapshot_id == MetricSnapshots.metric_snapshot_id,
+                MetricValues.metric_type_id == latest_snapshots.c.metric_type_id
+            )
+        )
+        .join(
+            Devices,
+            Devices.device_id == MetricSnapshots.device_id
+        )
+        .join(
+            MetricTypes,
+            MetricTypes.metric_type_id == latest_snapshots.c.metric_type_id
+        )
+    )
+    
+    if metric_type_name:
+        query = query.filter(MetricTypes.metric_type_name == metric_type_name)
+    
+    metrics = query.all()
+    
+    return [{
+        'device_uuid': device.device_uuid,
+        'device_name': device.device_name,
+        'metric_type': type.metric_type_name,
+        'value': float(value.value),
+        'timestamp': snapshot.server_timestamp_utc
+    } for snapshot, device, value, type in metrics]
+
+def add_metric_values(db: Session, snapshot_id: int, metrics: List[Dict]) -> None:
+    """Add metric values to a snapshot
+
+    Args:
+        db (Session): Database session
+        snapshot_id (int): ID of the snapshot
+        metrics (List[Dict]): List of metrics to add
+    """
     try:
-        with get_db() as db:
-            # Use a subquery to get the latest metric for each type
-            latest_metrics = (
-                db.query(
-                    Metrics.type,
-                    func.max(Metrics.created_at).label('max_created_at')
+        # First check for existing values to avoid duplicates
+        for metric in metrics:
+            existing = db.query(MetricValues).filter(
+                MetricValues.metric_snapshot_id == snapshot_id,
+                MetricValues.metric_type_id == metric['metric_type_id']
+            ).first()
+            
+            if existing:
+                # Update existing value
+                existing.value = metric['value']
+            else:
+                # Create new value
+                value = MetricValues(
+                    metric_snapshot_id=snapshot_id,
+                    metric_type_id=metric['metric_type_id'],
+                    value=metric['value']
                 )
-                .group_by(Metrics.type)
-                .subquery()
-            )
-
-            # Join with the original metrics table to get the full metric data
-            metrics = (
-                db.query(Metrics, MetricTypes, Devices)
-                .join(MetricTypes, Metrics.type == MetricTypes.id)
-                .join(Devices, Metrics.device == Devices.id)
-                .join(
-                    latest_metrics,
-                    and_(
-                        Metrics.type == latest_metrics.c.type,
-                        Metrics.created_at == latest_metrics.c.max_created_at
-                    )
-                )
-                .all()
-            )
-
-            # Format the results
-            return [{
-                'id': metric.id,
-                'device_uuid': device.uuid,
-                'type': metric_type.type,
-                'value': float(metric.value),
-                'created_at': metric.created_at
-            } for metric, metric_type, device in metrics]
+                db.add(value)
+        
+        db.commit()
     except Exception as e:
-        logger.error(f"Error getting latest metrics by type: {e}")
-        return []
+        db.rollback()
+        raise e
+
+def get_db():
+    # Assuming this function is defined elsewhere in your codebase
+    pass
