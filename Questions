@@ -27,6 +27,8 @@ devices part is not in view
 make sure timezone offsets are correct
 
 sdk for local dev
+add save to queue and message for failed requests
 visualisation library, and historical, data filter etc
+generate the above server side??
 
 generic error messages client side

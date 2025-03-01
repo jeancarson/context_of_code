@@ -5,7 +5,7 @@ import os
 import signal
 import time
 from datetime import datetime
-from typing import List
+from typing import List, Dict
 import aiohttp
 
 from devices.temperature.service import TemperatureService
@@ -14,6 +14,7 @@ from devices.local.service import LocalMetricsService
 from services.calculator import CalculatorService
 from devices.base_device import MetricDTO
 from utils.calculator import open_calculator
+from metrics_sdk import MetricsAPI, MetricSnapshotDTO, MetricValueDTO
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class Application:
         self._event_loop = None
         self._metrics_queue = []  # Queue to store metrics before sending
         self._last_calculator_state = None  # Track last calculator state
+        self._metrics_api = MetricsAPI(self.config['api']['base_url'])
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
@@ -89,64 +91,85 @@ class Application:
 
     async def send_metrics_task(self):
         """Task to send queued metrics on a fixed interval"""
-        while self._running:
-            try:
-                if self._metrics_queue:
-                    logger.info(f"Sending {len(self._metrics_queue)} metrics from queue")
-                    await self.send_metrics(self._metrics_queue)
-                    self._metrics_queue = []  # Clear the queue after sending
-                else:
-                    logger.info("No metrics in queue to send")
-                await asyncio.sleep(self.config['intervals']['send'])
-            except Exception as e:
-                logger.error(f"Error in send_metrics_task: {str(e)}")
-                if hasattr(e, '__traceback__'):
-                    import traceback
-                    logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
-                await asyncio.sleep(1)
+        await self._metrics_api.connect()  # Ensure API is connected
+        try:
+            while self._running:
+                try:
+                    if self._metrics_queue:
+                        logger.info(f"Sending {len(self._metrics_queue)} metrics from queue")
+                        await self.send_metrics(self._metrics_queue)
+                        self._metrics_queue = []  # Clear the queue after sending
+                    else:
+                        logger.info("No metrics in queue to send")
+                    await asyncio.sleep(self.config['intervals']['send'])
+                except Exception as e:
+                    logger.error(f"Error in send_metrics_task: {str(e)}")
+                    if hasattr(e, '__traceback__'):
+                        import traceback
+                        logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
+                    await asyncio.sleep(1)
+        finally:
+            await self._metrics_api.close()  # Ensure we clean up
 
     async def send_metrics(self, metrics: List[MetricDTO]) -> None:
-        """Send metrics to API"""
+        """Send metrics to API using the SDK"""
         if not metrics:
             return
 
         # Group metrics by timestamp to create snapshots
-        metrics_by_timestamp = {}
+        metrics_by_timestamp: Dict[float, List[MetricDTO]] = {}
         for metric in metrics:
-            timestamp = metric.created_at or time.time()  # Use created_at or current time
+            timestamp = metric.created_at or time.time()
             if timestamp not in metrics_by_timestamp:
                 metrics_by_timestamp[timestamp] = []
-            metrics_by_timestamp[timestamp].append({
-                'type': metric.type,
-                'value': metric.value
-            })
+            metrics_by_timestamp[timestamp].append(metric)
 
         # Send each snapshot
         for timestamp, metrics_list in metrics_by_timestamp.items():
             try:
-                # Get device UUID for the first metric type (they should all be from same device)
-                device_uuid = await self.get_device_id(metrics_list[0]['type'])
+                # Get device info for the first metric type (they should all be from same device)
+                device_uuid = await self.get_device_id(metrics_list[0].type)
+                device = self._get_device_for_metric(metrics_list[0].type)
+                
                 if not device_uuid:
-                    logger.error(f"No device UUID found for metric type {metrics_list[0]['type']}")
+                    logger.error(f"No device UUID found for metric type {metrics_list[0].type}")
                     continue
 
-                async with aiohttp.ClientSession() as session:
-                    data = {
-                        'device_uuid': device_uuid,
-                        'client_timestamp': datetime.fromtimestamp(timestamp).isoformat(),
-                        'client_timezone_minutes': -time.timezone // 60,  # Convert seconds to minutes
-                        'metrics': metrics_list
-                    }
-                    async with session.post(
-                        f"{self.config['api']['base_url']}/metrics",
-                        json=data
-                    ) as response:
-                        if response.status != 200:
-                            response_data = await response.json()
-                            logger.error(f"Error sending metrics: {response.status}")
-                            logger.error(f"Server response: {response_data}")
+                # Create metric values
+                metric_values = [
+                    MetricValueDTO(
+                        type=metric.type,  # This will be serialized as 'type' in JSON
+                        value=metric.value
+                    ) for metric in metrics_list
+                ]
+
+                # Create and send snapshot
+                snapshot = MetricSnapshotDTO(
+                    device_uuid=device_uuid,
+                    aggregator_uuid=str(device.aggregator_uuid),
+                    client_timestamp=datetime.fromtimestamp(timestamp).isoformat(),  # Will be serialized as 'client_timestamp'
+                    client_timezone_minutes=-time.timezone // 60,
+                    metrics=metric_values  # Will be serialized as 'metrics'
+                )
+
+                success = await self._metrics_api.send_metrics(snapshot)
+                if not success:
+                    logger.error("Failed to send metrics")
+
             except Exception as e:
                 logger.error(f"Error sending metrics: {e}")
+
+    def _get_device_for_metric(self, metric_type: str):
+        """Get device instance for metric type"""
+        device_map = {
+            'Temperature': self.temperature_service,
+            'GPBtoEURexchangeRate': self.exchange_rate_service,
+            'CPUPercent': self.local_metrics_service,
+            'RAMPercent': self.local_metrics_service,
+            'DiskPercent': self.local_metrics_service,
+            'local': self.local_metrics_service
+        }
+        return device_map.get(metric_type)
 
     async def get_device_id(self, metric_type: str) -> str:
         """Get device ID for metric type, using the appropriate device's UUID"""
