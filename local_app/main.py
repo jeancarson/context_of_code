@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import signal
-import sys
 import time
 from datetime import datetime
 from typing import List
@@ -14,6 +13,7 @@ from devices.exchange_rate.service import ExchangeRateService
 from devices.local.service import LocalMetricsService
 from services.calculator import CalculatorService
 from devices.base_device import MetricDTO
+from utils.calculator import open_calculator
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ class Application:
         self._running = True
         self._event_loop = None
         self._metrics_queue = []  # Queue to store metrics before sending
+        self._last_calculator_state = None  # Track last calculator state
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
@@ -104,40 +105,48 @@ class Application:
                     logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
                 await asyncio.sleep(1)
 
-    async def send_metrics(self, metrics: List[MetricDTO]):
-        """Send metrics to the server"""
+    async def send_metrics(self, metrics: List[MetricDTO]) -> None:
+        """Send metrics to API"""
         if not metrics:
             return
 
-        async with aiohttp.ClientSession() as session:
+        # Group metrics by timestamp to create snapshots
+        metrics_by_timestamp = {}
+        for metric in metrics:
+            timestamp = metric.created_at or time.time()  # Use created_at or current time
+            if timestamp not in metrics_by_timestamp:
+                metrics_by_timestamp[timestamp] = []
+            metrics_by_timestamp[timestamp].append({
+                'type': metric.type,
+                'value': metric.value
+            })
+
+        # Send each snapshot
+        for timestamp, metrics_list in metrics_by_timestamp.items():
             try:
-                metrics_data = {
-                    "metrics": [{
-                        "type": m.type,
-                        "value": m.value,
-                        "device_id": m.uuid.hex if m.uuid else None,
-                        "created_at": str(datetime.now()) if m.created_at is None else str(m.created_at)
-                    } for m in metrics]
-                }
-                
-                url = f"{self.config['api']['base_url']}/api/metrics"
-                logger.info(f"Sending metrics to URL: {url}")
-                async with session.post(url, json=metrics_data) as response:
-                    response_data = await response.json()
-                    logger.info(f"Server response: {response_data}")
-                    
-                    # Check for calculator flag
-                    logger.info("Checking calculator flag...")
-                    if self.calculator_service.check_calculator_flag(response_data):
-                        logger.info("Calculator flag is True, opening calculator...")
-                        self.calculator_service.open_calculator()
-                    else:
-                        logger.info("Calculator flag is False, not opening calculator")
-                        
-                    return response_data
+                # Get device UUID for the first metric type (they should all be from same device)
+                device_uuid = await self.get_device_id(metrics_list[0]['type'])
+                if not device_uuid:
+                    logger.error(f"No device UUID found for metric type {metrics_list[0]['type']}")
+                    continue
+
+                async with aiohttp.ClientSession() as session:
+                    data = {
+                        'device_uuid': device_uuid,
+                        'client_timestamp': datetime.fromtimestamp(timestamp).isoformat(),
+                        'client_timezone_minutes': -time.timezone // 60,  # Convert seconds to minutes
+                        'metrics': metrics_list
+                    }
+                    async with session.post(
+                        f"{self.config['api']['base_url']}/metrics",
+                        json=data
+                    ) as response:
+                        if response.status != 200:
+                            response_data = await response.json()
+                            logger.error(f"Error sending metrics: {response.status}")
+                            logger.error(f"Server response: {response_data}")
             except Exception as e:
-                logger.error(f"Error sending metrics: {str(e)}")
-                return None
+                logger.error(f"Error sending metrics: {e}")
 
     async def get_device_id(self, metric_type: str) -> str:
         """Get device ID for metric type, using the appropriate device's UUID"""
@@ -164,39 +173,24 @@ class Application:
         return None
 
     async def check_calculator(self):
-        """Check if calculator should be opened"""
-        async with aiohttp.ClientSession() as session:
-            try:
-                url = f"{self.config['api']['base_url']}/toggle-calculator"
-                logger.info(f"Checking calculator at URL: {url}")
-                async with session.post(url) as response:
-                    response_data = await response.json()
-                    logger.info(f"Calculator response: {response_data}")
-                    
-                    if self.calculator_service.check_calculator_flag(response_data):
-                        logger.info("Opening calculator...")
-                        self.calculator_service.open_calculator()
-            except Exception as e:
-                logger.error(f"Error checking calculator: {str(e)}")
-
-    async def check_calculator_task(self):
-        """Task to check calculator flag periodically"""
+        """Check if calculator needs to be opened"""
         while self._running:
             try:
-                url = f"{self.config['api']['base_url']}/check-calculator"
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(url) as response:
-                        response_data = await response.json()
-                        logger.info(f"Calculator check response: {response_data}")
-                        
-                        if self.calculator_service.check_calculator_flag(response_data):
-                            logger.info("Opening calculator...")
-                            self.calculator_service.open_calculator()
-                
-                await asyncio.sleep(1)  # Check every second
+                    async with session.get(f"{self.config['api']['base_url']}/check-calculator") as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            current_state = data.get('calculator_state')
+                            
+                            # Only open calculator when state changes
+                            if current_state != self._last_calculator_state and self._last_calculator_state is not None:
+                                open_calculator()
+                                logger.info("Opening calculator due to state change")
+                            
+                            self._last_calculator_state = current_state
             except Exception as e:
-                logger.error(f"Error checking calculator: {str(e)}")
-                await asyncio.sleep(1)
+                logger.error(f"Error checking calculator: {e}")
+            await asyncio.sleep(1)  # Poll every second
 
     async def run_async(self):
         """Async main loop"""
@@ -216,7 +210,7 @@ class Application:
                     self.config['intervals']['local']
                 ),
                 self.send_metrics_task(),
-                self.check_calculator_task()
+                self.check_calculator()  # Add calculator check task
             ]
             
             # Run all tasks concurrently

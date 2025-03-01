@@ -4,7 +4,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.pool import QueuePool
 from contextlib import contextmanager
-from .models.generated_models import Base, Metrics, Visits, Devices, MetricTypes
+from .models.generated_models import Base, Visits, Devices, MetricTypes, MetricSnapshots, MetricValues, Aggregators
 
 logger = logging.getLogger(__name__)
 

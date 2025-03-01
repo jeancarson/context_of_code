@@ -4,10 +4,24 @@
     <title>Debug View</title>
     <link rel="stylesheet" href="/static/styles.css">
     <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow-y: auto;
+            position: relative;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+        }
         .debug-container {
+            flex: 1;
             padding: 20px;
             max-width: 1200px;
             margin: 0 auto;
+            position: relative;
+            overflow-y: auto;
         }
         .table-container {
             margin-bottom: 30px;
@@ -68,6 +82,9 @@
                 <tr>
                     <th>ID</th>
                     <th>UUID</th>
+                    <th>Name</th>
+                    <th>Aggregator Name</th>
+                    <th>Aggregator UUID</th>
                     <th>Created At</th>
                     <th>Metric Count</th>
                 </tr>
@@ -75,6 +92,9 @@
                 <tr>
                     <td>{{ device.id }}</td>
                     <td>{{ device.uuid }}</td>
+                    <td>{{ device.name }}</td>
+                    <td>{{ device.aggregator_name }}</td>
+                    <td>{{ device.aggregator_uuid }}</td>
                     <td>{{ device.created_at }}</td>
                     <td>{{ device.metric_count }}</td>
                 </tr>
@@ -82,6 +102,32 @@
             </table>
             {% else %}
             <div class="empty-table">No devices registered</div>
+            {% endif %}
+        </div>
+
+        <div class="table-container">
+            <h2>Latest Metrics</h2>
+            {% if metrics %}
+            <table>
+                <tr>
+                    <th>Device Name</th>
+                    <th>Device UUID</th>
+                    <th>Metric Type</th>
+                    <th>Value</th>
+                    <th>Timestamp</th>
+                </tr>
+                {% for metric in metrics %}
+                <tr>
+                    <td>{{ metric.device_name }}</td>
+                    <td>{{ metric.device_uuid }}</td>
+                    <td>{{ metric.metric_type }}</td>
+                    <td>{{ metric.value }}</td>
+                    <td>{{ metric.timestamp }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <div class="empty-table">No metrics recorded</div>
             {% endif %}
         </div>
 
@@ -106,34 +152,6 @@
             </table>
             {% else %}
             <div class="empty-table">No metric types defined</div>
-            {% endif %}
-        </div>
-
-        <div class="table-container">
-            <h2>Recent Metrics</h2>
-            {% if metrics %}
-            <table>
-                <tr>
-                    <th>ID</th>
-                    <th>Device UUID</th>
-                    <th>Type</th>
-                    <th>Value</th>
-                    <th>Created At</th>
-                    <th>Timestamp</th>
-                </tr>
-                {% for metric in metrics %}
-                <tr>
-                    <td>{{ metric.id }}</td>
-                    <td>{{ metric.device_uuid }}</td>
-                    <td>{{ metric.type }}</td>
-                    <td>{{ "%.2f"|format(metric.value) }}</td>
-                    <td>{{ metric.created_at }}</td>
-                    <td>{{ metric.timestamp }}</td>
-                </tr>
-                {% endfor %}
-            </table>
-            {% else %}
-            <div class="empty-table">No metrics collected</div>
             {% endif %}
         </div>
 
