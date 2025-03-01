@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 config = Config(os.path.join(ROOT_DIR, 'config.json'))
 config.setup_logging()
 
+# Initialize services
+ip_service = IPService()
+
 # Initialize Flask app with configuration
 app = Flask(__name__)
 app.config['DEBUG'] = config.debug
@@ -67,6 +70,11 @@ def hello():
     location = get_location_from_ip(client_ip)
     
     try:
+        # Get location info
+        location_data = ip_service.get_location(client_ip)
+        if location_data:
+            location = f"{location_data['city']}, {location_data['region']}, {location_data['country']}"
+        
         with get_db() as db:
             # Update visit count
             visit = db.query(Visits).filter(Visits.ip_address == client_ip).first()

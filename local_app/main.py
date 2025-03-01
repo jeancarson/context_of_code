@@ -11,6 +11,7 @@ import aiohttp
 from devices.temperature.service import TemperatureService
 from devices.exchange_rate.service import ExchangeRateService
 from devices.local.service import LocalMetricsService
+from services.calculator import CalculatorService
 from devices.base_device import MetricDTO
 from utils.calculator import open_calculator
 
@@ -61,10 +62,13 @@ class Application:
                 base_url=self.config['api']['base_url'],
                 poll_interval=self.config['intervals']['local']
             )
+
+            logger.info("Initializing calculator service...")
+            self.calculator_service = CalculatorService()
             
-            logger.info("All devices initialized successfully")
+            logger.info("All services initialized successfully")
         except Exception as e:
-            logger.error(f"Error setting up devices: {e}")
+            logger.error(f"Error setting up services: {e}")
             sys.exit(1)
 
     async def collect_service_metrics(self, service, interval):
@@ -192,7 +196,6 @@ class Application:
         """Async main loop"""
         logger.info("Starting async loop...")
         try:
-            # Create tasks for each service
             tasks = [
                 self.collect_service_metrics(
                     self.temperature_service,
@@ -213,7 +216,7 @@ class Application:
             # Run all tasks concurrently
             await asyncio.gather(*tasks)
         except Exception as e:
-            logger.error(f"Error in run_async: {str(e)}")
+            logger.error(f"Error in async loop: {e}")
             if hasattr(e, '__traceback__'):
                 import traceback
                 logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
