@@ -3,19 +3,19 @@ import uuid
 import datetime
 import requests
 from flask import Flask, jsonify, send_from_directory, request, render_template
-from lib.config import Config
+from web_app.lib.config import Config
 import logging
-from lib.database import init_db, get_db
-from lib.models.generated_models import Aggregators, Devices, MetricTypes, MetricSnapshots, MetricValues, Visits
-from lib.constants import StatusCode, HTTPStatusCode
+from web_app.lib.database import init_db, get_db
+from web_app.lib.models.generated_models import Aggregators, Devices, MetricTypes, MetricSnapshots, MetricValues, Visits
+from web_app.lib.constants import StatusCode, HTTPStatusCode
 from sqlalchemy import select, func, and_, desc, text
 import sys
-from lib.models.dto import (
+from web_app.lib.models.dto import (
     AggregatorDTO, DeviceDTO, MetricTypeDTO, MetricSnapshotDTO, MetricValueDTO,
     convert_to_snapshot_orm, convert_to_metric_value_orm
 )
 from typing import Optional
-from lib.services.orm_service import (
+from web_app.lib.services.orm_service import (
     get_all_devices,
     get_all_metric_types,
     get_recent_metrics,
@@ -24,7 +24,7 @@ from lib.services.orm_service import (
 )
 from threading import Lock
 import time
-from lib.ip_service import IPService
+from web_app.lib.ip_service import IPService
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
