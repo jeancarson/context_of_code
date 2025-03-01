@@ -24,6 +24,7 @@ from lib.services.orm_service import (
 )
 from threading import Lock
 import time
+from lib.ip_service import IPService
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +42,9 @@ app.config['SECRET_KEY'] = config.server.secret_key
 calculator_lock = Lock()
 calculator_state = "A"  # Toggle between "A" and "B"
 
+# Initialize IP service
+ip_service = IPService()
+
 def get_client_ip():
     """Get the client's IP address"""
     if request.headers.getlist("X-Forwarded-For"):
@@ -49,19 +53,10 @@ def get_client_ip():
     return request.remote_addr
 
 def get_location_from_ip(ip: str) -> str:
-    """Get location string from IP address"""
-    if ip in ['127.0.0.1', 'localhost', '::1']:
-        return "Local Machine"
-        
-    try:
-        response = requests.get(f'http://ip-api.com/json/{ip}')
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('status') == 'success':
-                return f"{data.get('city', '')}, {data.get('country', '')}"
-    except Exception as e:
-        logger.error(f"Error getting location: {e}")
-    
+    """Get location string from IP address using IPService"""
+    location = ip_service.get_location(ip)
+    if location:
+        return f"{location.get('city', '')}, {location.get('country', '')}"
     return "Unknown Location"
 
 @app.route("/")
@@ -92,17 +87,8 @@ def hello():
     
     return render_template(
         "index.html",
-        remote_metrics={},
         visit_count=visit_count,
         location=location
-    )
-
-@app.route("/metrics")
-def metrics_page():
-    """Display metrics dashboard"""
-    return render_template(
-        "metrics.html",
-        remote_metrics={}
     )
 
 @app.route("/register/aggregator", methods=["POST"])
@@ -274,59 +260,16 @@ def add_metrics():
             "message": str(e)
         }), HTTPStatusCode.INTERNAL_SERVER_ERROR
 
-@app.route("/metrics", methods=["GET"])
-def get_metrics():
-    """Get the latest metrics for all devices"""
-    try:
-        with get_db() as db:
-            # Get latest snapshots for each device with their values
-            latest_snapshots = (
-                db.query(
-                    MetricSnapshots,
-                    Devices,
-                    MetricValues,
-                    MetricTypes
-                )
-                .join(Devices)
-                .join(MetricValues)
-                .join(MetricTypes)
-                .order_by(
-                    Devices.device_id,
-                    MetricSnapshots.server_timestamp_utc.desc()
-                )
-                .all()
-            )
-            
-            # Group metrics by device
-            metrics_by_device = {}
-            for snapshot, device, value, metric_type in latest_snapshots:
-                if device.device_uuid not in metrics_by_device:
-                    metrics_by_device[device.device_uuid] = {
-                        'device_name': device.device_name,
-                        'timestamp': snapshot.server_timestamp_utc,
-                        'metrics': {}
-                    }
-                metrics_by_device[device.device_uuid]['metrics'][metric_type.metric_type_name] = float(value.value)
-            
-            return jsonify({
-                "status": StatusCode.OK,
-                "data": metrics_by_device
-            })
-            
-    except Exception as e:
-        logger.error(f"Error getting metrics: {e}")
-        return jsonify({
-            "status": StatusCode.ERROR,
-            "message": str(e)
-        }), HTTPStatusCode.INTERNAL_SERVER_ERROR
-
 @app.route("/toggle-calculator", methods=["POST"])
 def toggle_calculator():
     """Toggle calculator state between A and B"""
     global calculator_state
     with calculator_lock:
         calculator_state = "B" if calculator_state == "A" else "A"
-        return jsonify({"calculator_state": calculator_state})
+        return jsonify({
+            "calculator_state": calculator_state,
+            "calculator_requested": True
+        })
 
 @app.route("/check-calculator", methods=["GET"])
 def check_calculator():
