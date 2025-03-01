@@ -45,8 +45,9 @@ app.config['SECRET_KEY'] = config.server.secret_key
 calculator_lock = Lock()
 calculator_state = "A"  # Toggle between "A" and "B"
 
-# Initialize IP service
-ip_service = IPService()
+# Initialize database if running directly (not through WSGI)
+if __name__ == "__main__":
+    init_db()
 
 def get_client_ip():
     """Get the client's IP address"""
@@ -321,9 +322,6 @@ def send_static(path):
 
 if __name__ == "__main__":
     try:
-        # Initialize the database before running the app
-        init_db()
-        
         # Start the Flask app
         app.run(
             host=config.server.host,
@@ -333,3 +331,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
         sys.exit(1)
+
+# Make the app variable available for WSGI
+application = app
