@@ -3,7 +3,7 @@ import uuid
 import datetime
 import requests
 from flask import Flask, jsonify, send_from_directory, request, render_template
-from dash import Dash, html, dcc, Input, Output, State, ctx
+from dash import Dash, html, dcc, Input, Output, State, ctx, clientside_callback
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
@@ -60,7 +60,9 @@ dash_app = Dash(
 # Define the Dash layout with routing
 dash_app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
-    html.Div(id='page-content')
+    html.Div(id='page-content'),
+    # Add a store for calculator alerts
+    dcc.Store(id='calculator-alert-store')
 ])
 
 # Callback to handle routing
@@ -225,7 +227,7 @@ def display_page(pathname):
 
 # Add callback for calculator button
 @dash_app.callback(
-    Output('calculator-button', 'children'),
+    Output('calculator-alert-store', 'data'),
     Input('calculator-button', 'n_clicks'),
     prevent_initial_call=True
 )
@@ -235,12 +237,27 @@ def handle_calculator_click(n_clicks):
         try:
             response = requests.post(f"http://localhost:{config.server.port}/toggle-calculator")
             if response.status_code == 200:
-                data = response.json()
-                if data.get('calculator_requested'):
-                    return 'Calculator Requested!'
+                # Return data to trigger the alert
+                return {'show_alert': True, 'message': 'Calculator request sent to active aggregators!'}
         except Exception as e:
             logger.error(f"Error toggling calculator: {e}")
-    return 'Open Calculator'
+            return {'show_alert': True, 'message': f'Error: {str(e)}'}
+    
+    return {'show_alert': False}
+
+# Add clientside callback to show the alert
+clientside_callback(
+    """
+    function(data) {
+        if(data && data.show_alert) {
+            alert(data.message);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('calculator-button', 'n_clicks'),
+    Input('calculator-alert-store', 'data')
+)
 
 calculator_lock = Lock()
 calculator_state = "A"  # Toggle between "A" and "B"
