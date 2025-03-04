@@ -159,4 +159,12 @@ input:focus {
     outline: none;
     border-color: #3498db;
     box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+}
+
+.update-info {
+    text-align: right;
+    padding: 10px;
+    color: #666;
+    font-size: 0.9em;
+    font-style: italic;
 } 

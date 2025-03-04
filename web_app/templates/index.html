@@ -18,7 +18,7 @@
             color: #666;
             margin-top: 5px;
         }
-        .task-manager-btn {
+        .button {
             display: inline-block;
             padding: 10px 20px;
             background-color: #4CAF50;
@@ -28,9 +28,20 @@
             margin: 10px;
             cursor: pointer;
             border: none;
+            font-size: 1em;
         }
-        .task-manager-btn:hover {
+        .button:hover {
             background-color: #45a049;
+        }
+        .button.dashboard {
+            background-color: #3498db;
+        }
+        .button.dashboard:hover {
+            background-color: #2980b9;
+        }
+        .container {
+            text-align: center;
+            padding: 20px;
         }
     </style>
 </head>
@@ -40,10 +51,8 @@
         <div class="location-text">Visiting from: {{ location }}</div>
     </div>
     <div class="container">
-        <a href="/debug" class="box">
-            HELLO
-        </a>
-        <button class="task-manager-btn" onclick="openCalculator()">Open calculator</button>
+        <a href="/dashboard/" class="button dashboard">View Metrics Dashboard</a>
+        <button class="button" onclick="openCalculator()">Open Calculator</button>
     </div>
 
     <script>
