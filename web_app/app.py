@@ -52,120 +52,195 @@ server.config['SECRET_KEY'] = config.server.secret_key
 dash_app = Dash(
     __name__,
     server=server,
-    url_base_pathname='/dashboard/',
-    suppress_callback_exceptions=True, 
-    title="METRICS"
+    url_base_pathname='/',  # Change to root path
+    suppress_callback_exceptions=True,
+    title="JEAN"
 )
 
-# Define the Dash layout
+# Define the Dash layout with routing
 dash_app.layout = html.Div([
-    html.H1('Metrics Dashboard', className='header'),
-    
-    # Hidden div for storing initialization state
-    html.Div(id='initialization-div', style={'display': 'none'}),
-    
-    # Add interval component for automatic updates (every 5 seconds)
-    dcc.Interval(
-        id='interval-component',
-        interval=30*1000,  # in milliseconds
-        n_intervals=0
-    ),
-    
-    # Filters Section
-    html.Div([
-        html.Div([
-            html.Label('Metric Type (optional)'),
-            dcc.Dropdown(
-                id='metric-type-dropdown',
-                placeholder='Select a metric type',
-                options=[],
-                clearable=True
-            )
-        ], className='filter-item'),
-        
-        html.Div([
-            html.Label('Date Range (optional)'),
-            dcc.DatePickerRange(
-                id='date-picker',
-                start_date=None,
-                end_date=None,
-                display_format='YYYY-MM-DD'
-            )
-        ], className='filter-item'),
-        
-        html.Div([
-            html.Label('Value Range (optional)'),
-            html.Div([
-                dcc.Input(
-                    id='min-value-input',
-                    type='number',
-                    placeholder='Min value',
-                    className='value-input'
-                ),
-                html.Span('to', className='value-range-separator'),
-                dcc.Input(
-                    id='max-value-input',
-                    type='number',
-                    placeholder='Max value',
-                    className='value-input'
-                )
-            ], className='value-range-inputs')
-        ], className='filter-item'),
-        
-        html.Div([
-            html.Label('Aggregator (optional)'),
-            dcc.Dropdown(
-                id='aggregator-dropdown',
-                placeholder='Select an aggregator',
-                options=[],
-                clearable=True
-            )
-        ], className='filter-item'),
-        
-        html.Div([
-            html.Label('Device (optional)'),
-            dcc.Dropdown(
-                id='device-dropdown',
-                placeholder='Select a device',
-                options=[],
-                clearable=True
-            )
-        ], className='filter-item'),
-        
-        html.Div([
-            html.Label('Sort Order'),
-            dcc.RadioItems(
-                id='sort-order',
-                options=[
-                    {'label': 'Newest First', 'value': 'desc'},
-                    {'label': 'Oldest First', 'value': 'asc'}
-                ],
-                value='desc',
-                className='sort-options'
-            )
-        ], className='filter-item'),
-    ], className='filters-container'),
-    
-    # Add last update time display
-    html.Div(id='last-update-time', className='update-info'),
-    
-    # Visualization Section
-    html.Div([
-        html.Div([
-            dcc.Graph(id='metric-gauge', style={'display': 'none'}),
-            dcc.Graph(id='metric-history', style={'display': 'none'}),
-            html.Button('Toggle View', id='toggle-view-button', style={'display': 'none'})
-        ], className='visualization-container'),
-        
-        # Data Table
-        html.Div([
-            dcc.Loading(
-                id="loading-table",
-                children=[html.Div(id='metrics-table')]
-            )
-        ], className='table-container')
-    ], className='content-container')
+    dcc.Location(id='url', refresh=False),
+    html.Div(id='page-content')
 ])
+
+# Callback to handle routing
+@dash_app.callback(
+    Output('page-content', 'children'),
+    Input('url', 'pathname')
+)
+def display_page(pathname):
+    if pathname == '/':
+        # Home page layout
+        client_ip = get_client_ip()
+        visit_count = 1
+        location = get_location_from_ip(client_ip)
+        
+        try:
+            with get_db() as db:
+                # Update visit count
+                visit = db.query(Visits).filter(Visits.ip_address == client_ip).first()
+                if visit:
+                    visit.count += 1
+                    visit.last_visit = datetime.datetime.now()
+                    visit_count = visit.count
+                else:
+                    visit = Visits(
+                        ip_address=client_ip,
+                        count=1,
+                        last_visit=datetime.datetime.now()
+                    )
+                    db.add(visit)
+                db.commit()
+        except Exception as e:
+            logger.error(f"Error updating visit count: {e}")
+        
+        return html.Div([
+            html.Div([
+                html.Div([
+                    html.Div(f"You have visited this page {visit_count} time{'s' if visit_count != 1 else ''}! WHhy are you so obsessed with me? 🤨"),
+                    html.Div(f"Visiting from: {location}", className='location-text')
+                ], className='visit-banner'),
+                html.Div([
+                    dcc.Link('View Metrics Dashboard', href='/dashboard', className='button dashboard'),
+                    html.Button('Open Calculator', id='calculator-button', className='button', n_clicks=0)
+                ], className='container')
+            ])
+        ])
+    
+    elif pathname == '/dashboard':
+        # Dashboard layout with back button
+        return html.Div([
+            html.Div([
+                dcc.Link('← Back to Home', href='/', className='back-button'),
+                html.H1('Metrics Dashboard', className='header')
+            ], className='dashboard-header'),
+            
+            # Hidden div for storing initialization state
+            html.Div(id='initialization-div', style={'display': 'none'}),
+            
+            # Add interval component for automatic updates
+            dcc.Interval(
+                id='interval-component',
+                interval=30*1000,
+                n_intervals=0
+            ),
+            
+            # Filters Section
+            html.Div([
+                html.Div([
+                    html.Label('Metric Type (optional)'),
+                    dcc.Dropdown(
+                        id='metric-type-dropdown',
+                        placeholder='Select a metric type',
+                        options=[],
+                        clearable=True
+                    )
+                ], className='filter-item'),
+                
+                html.Div([
+                    html.Label('Date Range (optional)'),
+                    dcc.DatePickerRange(
+                        id='date-picker',
+                        start_date=None,
+                        end_date=None,
+                        display_format='YYYY-MM-DD'
+                    )
+                ], className='filter-item'),
+                
+                html.Div([
+                    html.Label('Value Range (optional)'),
+                    html.Div([
+                        dcc.Input(
+                            id='min-value-input',
+                            type='number',
+                            placeholder='Min value',
+                            className='value-input'
+                        ),
+                        html.Span('to', className='value-range-separator'),
+                        dcc.Input(
+                            id='max-value-input',
+                            type='number',
+                            placeholder='Max value',
+                            className='value-input'
+                        )
+                    ], className='value-range-inputs')
+                ], className='filter-item'),
+                
+                html.Div([
+                    html.Label('Aggregator (optional)'),
+                    dcc.Dropdown(
+                        id='aggregator-dropdown',
+                        placeholder='Select an aggregator',
+                        options=[],
+                        clearable=True
+                    )
+                ], className='filter-item'),
+                
+                html.Div([
+                    html.Label('Device (optional)'),
+                    dcc.Dropdown(
+                        id='device-dropdown',
+                        placeholder='Select a device',
+                        options=[],
+                        clearable=True
+                    )
+                ], className='filter-item'),
+                
+                html.Div([
+                    html.Label('Sort Order'),
+                    dcc.RadioItems(
+                        id='sort-order',
+                        options=[
+                            {'label': 'Newest First', 'value': 'desc'},
+                            {'label': 'Oldest First', 'value': 'asc'}
+                        ],
+                        value='desc',
+                        className='sort-options'
+                    )
+                ], className='filter-item'),
+            ], className='filters-container'),
+            
+            # Add last update time display
+            html.Div(id='last-update-time', className='update-info'),
+            
+            # Visualization Section
+            html.Div([
+                html.Div([
+                    dcc.Graph(id='metric-gauge', style={'display': 'none'}),
+                    dcc.Graph(id='metric-history', style={'display': 'none'}),
+                    html.Button('Toggle View', id='toggle-view-button', style={'display': 'none'})
+                ], className='visualization-container'),
+                
+                # Data Table
+                html.Div([
+                    dcc.Loading(
+                        id="loading-table",
+                        children=[html.Div(id='metrics-table')]
+                    )
+                ], className='table-container')
+            ], className='content-container')
+        ])
+    
+    return '404'
+
+# Add callback for calculator button
+@dash_app.callback(
+    Output('calculator-button', 'children'),
+    Input('calculator-button', 'n_clicks'),
+    prevent_initial_call=True
+)
+def handle_calculator_click(n_clicks):
+    if n_clicks:
+        # Make a request to toggle calculator
+        try:
+            response = requests.post(f"http://localhost:{config.server.port}/toggle-calculator")
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('calculator_requested'):
+                    return 'Calculator Requested!'
+        except Exception as e:
+            logger.error(f"Error toggling calculator: {e}")
+    return 'Open Calculator'
 
 calculator_lock = Lock()
 calculator_state = "A"  # Toggle between "A" and "B"
@@ -414,32 +489,6 @@ def check_calculator():
         return jsonify({
             "calculator_state": calculator_state
         })
-
-@server.route("/debug")
-def debug():
-    """Debug view showing all database tables"""
-    try:
-        with get_db() as db:
-            devices = get_all_devices(db)
-            metric_types = get_all_metric_types(db)
-            metrics = get_recent_metrics(db)  # Changed variable name to match template
-            latest_metrics = get_latest_metrics_by_type(db)
-            visits = get_all_visits(db)
-
-            return render_template(
-                "debug.html",
-                devices=devices,
-                metric_types=metric_types,
-                metrics=metrics,  # Changed to match template
-                latest_metrics=latest_metrics,
-                visits=visits
-            )
-    except Exception as e:
-        logger.error(f"Error in debug view: {e}")
-        return jsonify({
-            "status": "ERROR",
-            "message": str(e)
-        }), HTTPStatusCode.INTERNAL_SERVER_ERROR
 
 @server.route("/static/<path:path>")
 def send_static(path):
