@@ -19,7 +19,6 @@ class MetricValueDTO(BaseModel):
 
     class Config:
         populate_by_name = True
-        allow_population_by_field_name = True
 
 class MetricSnapshotDTO(BaseModel):
     """Data transfer object for metric snapshots with their values"""
@@ -40,4 +39,3 @@ class MetricSnapshotDTO(BaseModel):
 
     class Config:
         populate_by_name = True
-        allow_population_by_field_name = True

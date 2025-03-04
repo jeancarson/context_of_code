@@ -26,7 +26,9 @@ class Application:
         self._event_loop = None
         self._metrics_queue = []  # Queue to store metrics before sending
         self._last_calculator_state = None  # Track last calculator state
-        self._metrics_api = MetricsAPI(self.config['api']['base_url'])
+        # Use a persistent storage directory in the application directory
+        metrics_storage = os.path.join(os.path.dirname(__file__), 'metrics_storage')
+        self._metrics_api = MetricsAPI(self.config['api']['base_url'], storage_dir=metrics_storage)
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
@@ -116,48 +118,41 @@ class Application:
         if not metrics:
             return
 
-        # Group metrics by timestamp to create snapshots
-        metrics_by_timestamp: Dict[float, List[MetricDTO]] = {}
+        # Group metrics by device and timestamp
+        metrics_by_key: Dict[tuple, List[MetricDTO]] = {}
         for metric in metrics:
+            device = self._get_device_for_metric(metric.type)
+            if not device or not device.uuid:
+                logger.error(f"No valid device found for metric type: {metric.type}")
+                continue
+            
+            # Group by device and timestamp
             timestamp = metric.created_at or time.time()
-            if timestamp not in metrics_by_timestamp:
-                metrics_by_timestamp[timestamp] = []
-            metrics_by_timestamp[timestamp].append(metric)
+            key = (str(device.uuid), str(device.aggregator_uuid), timestamp)
+            if key not in metrics_by_key:
+                metrics_by_key[key] = []
+            metrics_by_key[key].append(metric)
 
-        # Send each snapshot
-        for timestamp, metrics_list in metrics_by_timestamp.items():
-            try:
-                # Get device info for the first metric type (they should all be from same device)
-                device_uuid = await self.get_device_id(metrics_list[0].type)
-                device = self._get_device_for_metric(metrics_list[0].type)
-                
-                if not device_uuid:
-                    logger.error(f"No device UUID found for metric type {metrics_list[0].type}")
-                    continue
+        # Create and send snapshots
+        for (device_uuid, aggregator_uuid, timestamp), grouped_metrics in metrics_by_key.items():
+            metric_values = [
+                MetricValueDTO(
+                    type=metric.type,
+                    value=metric.value
+                ) for metric in grouped_metrics
+            ]
 
-                # Create metric values
-                metric_values = [
-                    MetricValueDTO(
-                        type=metric.type,  # This will be serialized as 'type' in JSON
-                        value=metric.value
-                    ) for metric in metrics_list
-                ]
+            snapshot = MetricSnapshotDTO(
+                device_uuid=device_uuid,
+                aggregator_uuid=aggregator_uuid,
+                client_timestamp=datetime.fromtimestamp(timestamp).isoformat(),
+                client_timezone_minutes=-time.timezone // 60,
+                metrics=metric_values
+            )
 
-                # Create and send snapshot
-                snapshot = MetricSnapshotDTO(
-                    device_uuid=device_uuid,
-                    aggregator_uuid=str(device.aggregator_uuid),
-                    client_timestamp=datetime.fromtimestamp(timestamp).isoformat(),  # Will be serialized as 'client_timestamp'
-                    client_timezone_minutes=-time.timezone // 60,
-                    metrics=metric_values  # Will be serialized as 'metrics'
-                )
-
-                success = await self._metrics_api.send_metrics(snapshot)
-                if not success:
-                    logger.error("Failed to send metrics")
-
-            except Exception as e:
-                logger.error(f"Error sending metrics: {e}")
+            success = await self._metrics_api.send_metrics(snapshot)
+            if not success:
+                logger.error(f"Failed to send snapshot with {len(metric_values)} metrics")
 
     def _get_device_for_metric(self, metric_type: str):
         """Get device instance for metric type"""
@@ -197,6 +192,8 @@ class Application:
 
     async def check_calculator(self):
         """Check if calculator needs to be opened"""
+        connection_error_logged = False  # Track if we've already logged a connection error
+        
         while self._running:
             try:
                 async with aiohttp.ClientSession() as session:
@@ -211,14 +208,34 @@ class Application:
                                 logger.info("Opening calculator due to state change")
                             
                             self._last_calculator_state = current_state
+                            connection_error_logged = False  # Reset error flag on successful connection
+                        else:
+                            if not connection_error_logged:
+                                logger.info(f"Calculator check returned unexpected status {response.status}")
+                                connection_error_logged = True
+                                
+            except aiohttp.ClientError as e:
+                if not connection_error_logged:
+                    logger.info("Calculator service unavailable - web app appears to be offline")
+                    connection_error_logged = True
             except Exception as e:
-                logger.error(f"Error checking calculator: {e}")
+                if not connection_error_logged:
+                    logger.warning(f"Unexpected error in calculator check: {str(e)}")
+                    connection_error_logged = True
+                    
             await asyncio.sleep(1)  # Poll every second
+
+    async def initialize(self):
+        """Initialize async components"""
+        await self._metrics_api.connect()  # This will also load the persisted queue
 
     async def run_async(self):
         """Async main loop"""
         logger.info("Starting async loop...")
         try:
+            # First initialize async components
+            await self.initialize()
+            
             tasks = [
                 self.collect_service_metrics(
                     self.temperature_service,
@@ -276,9 +293,15 @@ class Application:
 
 def main():
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,  # Change to DEBUG level
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
+    
+    # Set specific loggers to appropriate levels
+    logging.getLogger('metrics_sdk.api').setLevel(logging.INFO)  # Keep SDK at INFO to reduce noise
+    logging.getLogger('urllib3').setLevel(logging.WARNING)  # Reduce HTTP client noise
+    logging.getLogger('asyncio').setLevel(logging.WARNING)  # Reduce async noise
+    
     app = Application()
     app.run()
 
