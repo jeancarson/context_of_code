@@ -181,58 +181,26 @@ class MetricsAPI:
 
     async def send_metrics(self, snapshot: MetricSnapshotDTO) -> bool:
         """
-        Send metrics to the server. If server is unreachable, store metrics for later retry.
+        Queue a single metric snapshot for sending
         
         Args:
-            snapshot: MetricSnapshotDTO containing the metrics to send
+            snapshot: MetricSnapshotDTO containing a single metric
             
         Returns:
-            bool: True if successful or queued for later, False if unrecoverable error
+            bool: True if queued successfully
         """
-        self._ensure_session()
-        
-        try:
-            # First try to send any queued metrics
-            await self.flush_queue()
-            
-            # Then try to send the new metrics
-            async with self._session.post(
-                f"{self.base_url}/metrics",
-                json=snapshot.dict()
-            ) as response:
-                if response.status == 200:
-                    logger.info(f"Successfully sent {len(snapshot.metrics)} metrics to web app")
-                    return True
-                else:
-                    error_text = await response.text()
-                    if response.status >= 500:
-                        logger.warning(f"Web app server error (HTTP {response.status}). Caching metrics for later retry.")
-                        await self._queue_metric(snapshot)
-                        return True
-                    logger.error(f"Failed to send metrics. Status: {response.status}, Error: {error_text}")
-                    return False
-                    
-        except aiohttp.ClientError as e:
-            # Connection error - queue for retry
-            logger.warning("Cannot connect to web app. Caching metrics for later retry.")
-            logger.debug(f"Connection error details: {str(e)}")
-            await self._queue_metric(snapshot)
-            return True
-            
-        except Exception as e:
-            # Unrecoverable error
-            logger.error(f"Unrecoverable error sending metrics: {str(e)}")
-            return False
+        await self._queue_metric(snapshot)
+        return True
 
     async def _queue_metric(self, snapshot: MetricSnapshotDTO):
-        """Add a metric to the retry queue and persist to disk"""
+        """Add a metric snapshot to the retry queue and persist to disk"""
         self._queue.append(snapshot)
         await self._save_queue_to_disk()
-        logger.info(f"Cached {len(snapshot.metrics)} metrics for later delivery (queue size: {len(self._queue)})")
+        logger.info(f"Cached metric snapshot for later delivery (queue size: {len(self._queue)})")
 
     async def flush_queue(self) -> bool:
         """
-        Attempt to send all queued metrics to the server
+        Attempt to send all queued metric snapshots to the server
         
         Returns:
             bool: True if all metrics were sent successfully, False otherwise
@@ -241,44 +209,49 @@ class MetricsAPI:
             return True
 
         total_snapshots = len(self._queue)
-        total_metrics = sum(len(snapshot.metrics) for snapshot in self._queue)
-        logger.info(f"Attempting to send {total_snapshots} queued snapshots ({total_metrics} total metrics)")
+        logger.info(f"Attempting to send {total_snapshots} queued metric snapshots")
 
         success = True
-        metrics_sent = 0
-        
+        # Process each snapshot individually
         while self._queue:
-            snapshot = self._queue[0]  # Peek at first item
+            snapshot = self._queue[0]  # Look at first snapshot
             try:
+                # Send individual snapshot
                 async with self._session.post(
                     f"{self.base_url}/metrics",
                     json=snapshot.dict()
                 ) as response:
                     if response.status == 200:
-                        self._queue.popleft()  # Remove on success
-                        metrics_sent += len(snapshot.metrics)
+                        self._queue.popleft()  # Only remove if successful
                     else:
                         error_text = await response.text()
-                        logger.warning(f"Web app not ready to receive metrics (HTTP {response.status}). Will retry later.")
-                        logger.debug(f"Server response: {error_text}")
-                        success = False
-                        break
+                        if response.status >= 500:
+                            logger.warning(f"Server error (HTTP {response.status}). Will retry later.")
+                            logger.debug(f"Server response: {error_text}")
+                            success = False
+                            break  # Stop processing on server error
+                        else:
+                            logger.error(f"Failed to send metrics. Status: {response.status}, Error: {error_text}")
+                            self._queue.popleft()  # Remove on client error as it won't succeed on retry
+                            success = False
+
             except aiohttp.ClientError as e:
-                logger.warning("Web app still not reachable. Keeping metrics in cache.")
+                logger.warning("Server not reachable. Keeping metrics in queue.")
                 logger.debug(f"Connection error details: {str(e)}")
                 success = False
-                break
+                break  # Stop processing on connection error
             except Exception as e:
-                logger.error(f"Error processing queued metrics: {str(e)}")
+                logger.error(f"Error sending queued metrics: {str(e)}")
                 self._queue.popleft()  # Remove on unrecoverable error
                 success = False
 
-        if success and metrics_sent > 0:
-            logger.info(f"Successfully delivered {metrics_sent} metrics from queue")
-            await self._clear_queue_file()
-        elif self._queue:
-            # Only save if there are remaining items
+        # Save remaining queue if any
+        if self._queue:
             await self._save_queue_to_disk()
+            logger.info(f"Saved remaining {len(self._queue)} snapshots to queue")
+        else:
+            await self._clear_queue_file()
+            logger.info("Queue successfully cleared")
 
         return success
 

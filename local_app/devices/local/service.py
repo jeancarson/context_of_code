@@ -1,6 +1,7 @@
 import psutil
 from typing import List
 from ..base_device import BaseDevice, MetricDTO
+import time
 
 class LocalMetricsService(BaseDevice):
     def __init__(self, base_url: str, poll_interval: int):
@@ -31,7 +32,9 @@ class LocalMetricsService(BaseDevice):
         
     def create_metric_with_type(self, specific_type: str, value: float) -> MetricDTO:
         """Create a metric with a specific type"""
-        metric = MetricDTO(type=specific_type, value=value)
-        if self.uuid:
-            metric.uuid = self.uuid
-        return metric
+        return MetricDTO(
+            type=specific_type,
+            value=value,
+            uuid=self.uuid,  # Always set the UUID from the device
+            created_at=time.time()
+        )

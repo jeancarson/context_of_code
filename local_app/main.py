@@ -92,67 +92,46 @@ class Application:
                 await asyncio.sleep(1)
 
     async def send_metrics_task(self):
-        """Task to send queued metrics on a fixed interval"""
-        await self._metrics_api.connect()  # Ensure API is connected
-        try:
-            while self._running:
-                try:
-                    if self._metrics_queue:
-                        logger.info(f"Sending {len(self._metrics_queue)} metrics from queue")
-                        await self.send_metrics(self._metrics_queue)
-                        self._metrics_queue = []  # Clear the queue after sending
-                    else:
-                        logger.info("No metrics in queue to send")
-                    await asyncio.sleep(self.config['intervals']['send'])
-                except Exception as e:
-                    logger.error(f"Error in send_metrics_task: {str(e)}")
-                    if hasattr(e, '__traceback__'):
-                        import traceback
-                        logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
-                    await asyncio.sleep(1)
-        finally:
-            await self._metrics_api.close()  # Ensure we clean up
+        """Task to periodically send queued metrics"""
+        while self._running:
+            try:
+                if self._metrics_queue:
+                    metrics = self._metrics_queue.copy()
+                    self._metrics_queue.clear()
+                    await self.send_metrics(metrics)
+            except Exception as e:
+                logger.error(f"Error in send_metrics_task: {e}")
+            finally:
+                await asyncio.sleep(self.config['intervals']['send'])
 
     async def send_metrics(self, metrics: List[MetricDTO]) -> None:
         """Send metrics to API using the SDK"""
         if not metrics:
             return
 
-        # Group metrics by device and timestamp
-        metrics_by_key: Dict[tuple, List[MetricDTO]] = {}
+        # Create a snapshot for each individual metric
         for metric in metrics:
             device = self._get_device_for_metric(metric.type)
             if not device or not device.uuid:
                 logger.error(f"No valid device found for metric type: {metric.type}")
                 continue
-            
-            # Group by device and timestamp
-            timestamp = metric.created_at or time.time()
-            key = (str(device.uuid), str(device.aggregator_uuid), timestamp)
-            if key not in metrics_by_key:
-                metrics_by_key[key] = []
-            metrics_by_key[key].append(metric)
 
-        # Create and send snapshots
-        for (device_uuid, aggregator_uuid, timestamp), grouped_metrics in metrics_by_key.items():
-            metric_values = [
-                MetricValueDTO(
+            # Create individual snapshot for this metric
+            snapshot = MetricSnapshotDTO(
+                device_uuid=str(device.uuid),
+                aggregator_uuid=str(device.aggregator_uuid),
+                client_timestamp=datetime.fromtimestamp(metric.created_at or time.time()).isoformat(),
+                client_timezone_minutes=-time.timezone // 60,
+                metrics=[MetricValueDTO(
                     type=metric.type,
                     value=metric.value
-                ) for metric in grouped_metrics
-            ]
-
-            snapshot = MetricSnapshotDTO(
-                device_uuid=device_uuid,
-                aggregator_uuid=aggregator_uuid,
-                client_timestamp=datetime.fromtimestamp(timestamp).isoformat(),
-                client_timezone_minutes=-time.timezone // 60,
-                metrics=metric_values
+                )]
             )
 
-            success = await self._metrics_api.send_metrics(snapshot)
-            if not success:
-                logger.error(f"Failed to send snapshot with {len(metric_values)} metrics")
+            await self._metrics_api.send_metrics(snapshot)  # Queue the snapshot
+
+        # After queueing all snapshots, try to flush the queue
+        await self._metrics_api.flush_queue()
 
     def _get_device_for_metric(self, metric_type: str):
         """Get device instance for metric type"""
@@ -164,7 +143,10 @@ class Application:
             'DiskPercent': self.local_metrics_service,
             'local': self.local_metrics_service
         }
-        return device_map.get(metric_type)
+        device = device_map.get(metric_type)
+        if device:
+            logger.debug(f"Found device for metric type {metric_type}: uuid={device.uuid}, aggregator={device.aggregator_uuid}")
+        return device
 
     async def get_device_id(self, metric_type: str) -> str:
         """Get device ID for metric type, using the appropriate device's UUID"""
