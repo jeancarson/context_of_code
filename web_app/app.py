@@ -60,9 +60,7 @@ dash_app = Dash(
 # Define the Dash layout with routing
 dash_app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
-    html.Div(id='page-content'),
-    # Add a store for calculator alerts
-    dcc.Store(id='calculator-alert-store')
+    html.Div(id='page-content')
 ])
 
 # Callback to handle routing
@@ -225,38 +223,35 @@ def display_page(pathname):
     
     return '404'
 
-# Add callback for calculator button
-@dash_app.callback(
-    Output('calculator-alert-store', 'data'),
-    Input('calculator-button', 'n_clicks'),
-    prevent_initial_call=True
-)
-def handle_calculator_click(n_clicks):
-    if n_clicks:
-        # Make a request to toggle calculator
-        try:
-            response = requests.post(f"http://localhost:{config.server.port}/toggle-calculator")
-            if response.status_code == 200:
-                # Return data to trigger the alert
-                return {'show_alert': True, 'message': 'Calculator request sent to active aggregators!'}
-        except Exception as e:
-            logger.error(f"Error toggling calculator: {e}")
-            return {'show_alert': True, 'message': f'Error: {str(e)}'}
-    
-    return {'show_alert': False}
-
-# Add clientside callback to show the alert
+# Replace with a pure clientside callback
 clientside_callback(
     """
-    function(data) {
-        if(data && data.show_alert) {
-            alert(data.message);
+    function(n_clicks) {
+        if (n_clicks) {
+            // Make the request to toggle calculator first
+            fetch('/toggle-calculator', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(() => {
+                // Show alert after request is sent (non-blocking)
+                setTimeout(() => {
+                    alert('Calculator request sent to active aggregators!');
+                }, 0);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error sending calculator request: ' + error.message);
+            });
         }
         return window.dash_clientside.no_update;
     }
     """,
     Output('calculator-button', 'n_clicks'),
-    Input('calculator-alert-store', 'data')
+    Input('calculator-button', 'n_clicks'),
+    prevent_initial_call=True
 )
 
 calculator_lock = Lock()
