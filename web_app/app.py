@@ -223,7 +223,6 @@ def display_page(pathname):
     
     return '404'
 
-# Replace with a pure clientside callback
 clientside_callback(
     """
     function(n_clicks) {
@@ -276,43 +275,6 @@ def get_location_from_ip(ip: str) -> str:
     return "Unknown Location"
 
 # Flask routes
-@server.route("/")
-def hello():
-    """Display the main dashboard"""
-    client_ip = get_client_ip()
-    visit_count = 1
-    location = get_location_from_ip(client_ip)
-    
-    try:
-        # Get location info
-        location_data = ip_service.get_location(client_ip)
-        if location_data:
-            location = f"{location_data['city']}, {location_data['region']}, {location_data['country']}"
-        
-        with get_db() as db:
-            # Update visit count
-            visit = db.query(Visits).filter(Visits.ip_address == client_ip).first()
-            if visit:
-                visit.count += 1
-                visit.last_visit = datetime.datetime.now()
-                visit_count = visit.count
-            else:
-                visit = Visits(
-                    ip_address=client_ip,
-                    count=1,
-                    last_visit=datetime.datetime.now()
-                )
-                db.add(visit)
-            db.commit()
-    except Exception as e:
-        logger.error(f"Error updating visit count: {e}")
-    
-    return render_template(
-        "index.html",
-        visit_count=visit_count,
-        location=location
-    )
-
 @server.route("/register/aggregator", methods=["POST"])
 def register_aggregator():
     """Register a new aggregator and return its UUID"""
