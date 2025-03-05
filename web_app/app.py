@@ -148,9 +148,10 @@ def display_page(pathname):
                     html.Label('Metric Type (optional)'),
                     dcc.Dropdown(
                         id='metric-type-dropdown',
-                        placeholder='Select a metric type',
+                        placeholder='Select metric type(s)',
                         options=[],
-                        clearable=True
+                        clearable=True,
+                        multi=True
                     )
                 ], className='filter-item'),
                 
@@ -187,9 +188,10 @@ def display_page(pathname):
                     html.Label('Aggregator (optional)'),
                     dcc.Dropdown(
                         id='aggregator-dropdown',
-                        placeholder='Select an aggregator',
+                        placeholder='Select aggregator(s)',
                         options=[],
-                        clearable=True
+                        clearable=True,
+                        multi=True
                     )
                 ], className='filter-item'),
                 
@@ -197,9 +199,10 @@ def display_page(pathname):
                     html.Label('Device (optional)'),
                     dcc.Dropdown(
                         id='device-dropdown',
-                        placeholder='Select a device',
+                        placeholder='Select device(s)',
                         options=[],
-                        clearable=True
+                        clearable=True,
+                        multi=True
                     )
                 ], className='filter-item'),
                 
@@ -259,7 +262,7 @@ def display_page(pathname):
                 
                 # No data message panel
                 html.Div(
-                    "No visualizations for selected filters",
+                    dcc.Markdown(id='no-data-message-text', children="No visualizations for selected filters"),
                     id='no-data-message',
                     style={
                         'display': 'none',
@@ -633,7 +636,7 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
             
             # Apply filters
             if metric_type_id:
-                base_query = base_query.filter(MetricTypes.metric_type_id == metric_type_id)
+                base_query = base_query.filter(MetricTypes.metric_type_id.in_(metric_type_id))
             if start_date:
                 start_date = pd.to_datetime(start_date)
                 base_query = base_query.filter(MetricSnapshots.client_timestamp_utc >= start_date)
@@ -645,9 +648,9 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
             if max_value is not None:
                 base_query = base_query.filter(MetricValues.value <= max_value)
             if aggregator_id:
-                base_query = base_query.filter(Aggregators.aggregator_id == aggregator_id)
+                base_query = base_query.filter(Aggregators.aggregator_id.in_(aggregator_id))
             if device_id:
-                base_query = base_query.filter(Devices.device_id == device_id)
+                base_query = base_query.filter(Devices.device_id.in_(device_id))
                 
             # Apply sorting
             if sort_order == 'desc':
@@ -746,8 +749,9 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                 html.Span(f" - Query time: {query_time:.3f}s", style={"font-style": "italic", "margin-left": "10px"})
             ])
             
-            # Only create visualizations if a specific metric type is selected and we have data
-            if metric_type_id and not df.empty:
+            # Only create visualizations if exactly one metric type is selected and we have data
+            if metric_type_id and len(metric_type_id) == 1 and not df.empty:
+                single_metric_id = metric_type_id[0]  # Get the single selected metric ID
                 # DUAL-QUERY APPROACH:
                 # 1. For the table, we only fetch the current page of data (e.g., 20 records)
                 # 2. For visualizations, we need more historical context, so we fetch more records
@@ -766,7 +770,7 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                     MetricSnapshots,
                     MetricValues.metric_snapshot_id == MetricSnapshots.metric_snapshot_id
                 )
-                .filter(MetricValues.metric_type_id == metric_type_id)
+                .filter(MetricValues.metric_type_id == single_metric_id)
                 .order_by(desc(MetricSnapshots.client_timestamp_utc))
                 .limit(1000))
                 
@@ -866,17 +870,25 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
 # Callback to control visualization container visibility
 @dash_app.callback(
     [Output('visualization-container', 'style'),
-     Output('no-data-message', 'style')],
+     Output('no-data-message', 'style'),
+     Output('no-data-message-text', 'children')],
     [Input('metric-type-dropdown', 'value'),
      Input('metric-gauge', 'figure')]
 )
 def toggle_visualization_visibility(metric_type_id, gauge_figure):
-    # Check if we have a metric selected and a valid gauge figure
-    if metric_type_id and gauge_figure and 'data' in gauge_figure and len(gauge_figure['data']) > 0:
+    # Check if we have exactly one metric selected and a valid gauge figure
+    if (metric_type_id and len(metric_type_id) == 1 and 
+        gauge_figure and 'data' in gauge_figure and len(gauge_figure['data']) > 0):
         # Show visualizations, hide message
-        return {'display': 'block'}, {'display': 'none'}
+        return {'display': 'block'}, {'display': 'none'}, ""
     else:
         # Hide visualizations, show message
+        message_text = "No visualizations for selected filters"
+        if not metric_type_id:
+            message_text = "Please select a metric to view visualizations"
+        elif len(metric_type_id) > 1:
+            message_text = "Please select only one metric type to view visualizations"
+            
         return {'display': 'none'}, {
             'display': 'block',
             'padding': '20px',
@@ -887,7 +899,7 @@ def toggle_visualization_visibility(metric_type_id, gauge_figure):
             'marginBottom': '20px',
             'fontSize': '16px',
             'color': '#6c757d'
-        }
+        }, message_text
 
 # Update page number when prev/next buttons are clicked
 @dash_app.callback(
