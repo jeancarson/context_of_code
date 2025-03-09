@@ -1,7 +1,13 @@
+import os
+import sys
+
+# Add the project root directory to the Python path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
+
 import asyncio
 import json
 import logging
-import os
 import signal
 import time
 from datetime import datetime
@@ -15,6 +21,8 @@ from services.calculator import CalculatorService
 from devices.base_device import MetricDTO
 from utils.calculator import open_calculator
 from metrics_sdk import MetricsAPI, MetricSnapshotDTO, MetricValueDTO
+from lib_utils.logger import Logger
+from local_app.config.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -274,10 +282,13 @@ class Application:
             self._cleanup()
 
 def main():
-    logging.basicConfig(
-        level=logging.DEBUG,  # Change to DEBUG level
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    # Load configuration
+    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+    config = Config(config_path)
+    
+    # Initialize logging using the shared logger
+    global logger
+    logger = Logger.setup_from_config("Local App", config)
     
     # Set specific loggers to appropriate levels
     logging.getLogger('metrics_sdk.api').setLevel(logging.INFO)  # Keep SDK at INFO to reduce noise

@@ -1,4 +1,10 @@
 import os
+import sys
+
+# Add the project root directory to the Python path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
+
 import uuid
 import datetime
 import requests
@@ -15,7 +21,6 @@ from web_app.lib.database import init_db, get_db
 from web_app.lib.models.generated_models import Aggregators, Devices, MetricTypes, MetricSnapshots, MetricValues, Visits
 from web_app.lib.constants import StatusCode, HTTPStatusCode
 from sqlalchemy import select, func, and_, desc, asc, text
-import sys
 from web_app.lib.models.dto import (
     AggregatorDTO, DeviceDTO, MetricTypeDTO, MetricSnapshotDTO, MetricValueDTO,
     convert_to_snapshot_orm, convert_to_metric_value_orm
@@ -38,14 +43,18 @@ from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 import json
 import threading
+from lib_utils.blocktimer import BlockTimer
+from web_app.metrics_cache import MetricsCache
+from lib_utils.logger import Logger
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Initialize logging first
-logger = logging.getLogger(__name__)
+# Initialize configuration first
 config = Config(os.path.join(ROOT_DIR, 'config.json'))
-config.setup_logging()
+
+# Initialize logging using the shared logger
+logger = Logger.setup_from_config("Web App", config)
 
 # Initialize services
 ip_service = IPService()
@@ -63,6 +72,9 @@ dash_app = Dash(
     suppress_callback_exceptions=True,
     title="JEAN"
 )
+
+# Initialize the metrics cache with a 30-second duration
+metrics_cache = MetricsCache(cache_duration_seconds=30)
 
 # Define the Dash layout with routing
 dash_app.layout = html.Div([
@@ -137,6 +149,9 @@ def display_page(pathname):
                     className='refresh-button-prominent', 
                     n_clicks=0
                 ),
+                
+                # Add refresh status div
+                html.Div(id='refresh-status', className='refresh-status'),
                 
                 # Last update time display
                 html.Div(id='last-update-time', className='update-info')
@@ -575,7 +590,7 @@ def populate_dropdowns(_, n_clicks):
      Output('metrics-table', 'children'),
      Output('pagination-info', 'children'),
      Output('page-number', 'max'),
-     Output('last-update-time', 'children')],  # Add output for last update time
+     Output('last-update-time', 'children')],
     [Input('metric-type-dropdown', 'value'),
      Input('date-picker', 'start_date'),
      Input('date-picker', 'end_date'),
@@ -584,288 +599,349 @@ def populate_dropdowns(_, n_clicks):
      Input('aggregator-dropdown', 'value'),
      Input('device-dropdown', 'value'),
      Input('sort-order', 'value'),
-     Input('page-number', 'value'),    # Input for current page
-     Input('rows-per-page', 'value'),  # Input for page size
-     Input('refresh-button', 'n_clicks')]  # Refresh button to trigger updates
+     Input('page-number', 'value'),
+     Input('rows-per-page', 'value'),
+     Input('refresh-button', 'n_clicks')]
 )
 def update_visualizations(metric_type_id, start_date, end_date, min_value, max_value,
                          aggregator_id, device_id, sort_order, page_number, rows_per_page, n_clicks):
-    """Server-side filtering and pagination of data"""
+    """Server-side filtering and pagination of data with caching"""
     try:
-        # Start timing the operation
-        start_time = datetime.datetime.now()
+        # Create a dictionary of all filter parameters for cache key generation
+        filter_params = {
+            'metric_type_id': metric_type_id,
+            'start_date': start_date,
+            'end_date': end_date,
+            'min_value': min_value,
+            'max_value': max_value,
+            'aggregator_id': aggregator_id,
+            'device_id': device_id,
+            'sort_order': sort_order,
+            'page_number': page_number,
+            'rows_per_page': rows_per_page,
+            'n_clicks': n_clicks  # This will be ignored in cache key generation
+        }
         
-        # Default page number to 0 if None
-        if page_number is None:
-            page_number = 0
-            
-        # Default rows per page to 20 if None
-        if rows_per_page is None:
-            rows_per_page = 20
-            
-        logger.info(f"Fetching page {page_number} with {rows_per_page} rows per page")
-        logger.info(f"Filters: metric_type={metric_type_id}, aggregator={aggregator_id}, device={device_id}")
+        # Check if we have a cache hit
+        cached_result = metrics_cache.get_cached_data(**filter_params)
         
-        with get_db() as db:
-            # Build the base query with all joins
-            base_query = (db.query(
-                MetricValues.value,
-                MetricSnapshots.client_timestamp_utc,
-                Devices.device_name,
-                Aggregators.name.label('aggregator_name'),
-                MetricTypes.metric_type_name,
-                MetricTypes.metric_type_id
-            )
-            .select_from(MetricValues)
-            .join(
-                MetricSnapshots,
-                MetricValues.metric_snapshot_id == MetricSnapshots.metric_snapshot_id
-            )
-            .join(
-                Devices,
-                MetricSnapshots.device_id == Devices.device_id
-            )
-            .join(
-                Aggregators,
-                Devices.aggregator_id == Aggregators.aggregator_id
-            )
-            .join(
-                MetricTypes,
-                MetricValues.metric_type_id == MetricTypes.metric_type_id
-            ))
+        # If we have a cache hit and it's not a refresh button click, use cached data
+        if cached_result is not None:
+            cached_data, age = cached_result
             
-            # Apply filters
-            if metric_type_id:
-                base_query = base_query.filter(MetricTypes.metric_type_id.in_(metric_type_id))
-            if start_date:
-                start_date = pd.to_datetime(start_date)
-                base_query = base_query.filter(MetricSnapshots.client_timestamp_utc >= start_date)
-            if end_date:
-                end_date = pd.to_datetime(end_date)
-                base_query = base_query.filter(MetricSnapshots.client_timestamp_utc <= end_date)
-            if min_value is not None:
-                base_query = base_query.filter(MetricValues.value >= min_value)
-            if max_value is not None:
-                base_query = base_query.filter(MetricValues.value <= max_value)
-            if aggregator_id:
-                base_query = base_query.filter(Aggregators.aggregator_id.in_(aggregator_id))
-            if device_id:
-                base_query = base_query.filter(Devices.device_id.in_(device_id))
-                
-            # Apply sorting
-            if sort_order == 'desc':
-                base_query = base_query.order_by(desc(MetricSnapshots.client_timestamp_utc))
+            # If refresh button was clicked, check if we're within cooldown period
+            if dash.callback_context.triggered and 'refresh-button.n_clicks' in dash.callback_context.triggered[0]['prop_id']:
+                logger.info(f"Refresh button clicked, but using cached data (age: {age:.1f}s)")
             else:
-                base_query = base_query.order_by(asc(MetricSnapshots.client_timestamp_utc))
+                logger.info(f"Using cached data for unchanged filters (age: {age:.1f}s)")
+            
+            # Add cache status to the last update time
+            gauge, history, table, pagination_info, total_pages, last_update_time = cached_data
+            
+            # Update the last update time to show it's from cache
+            if isinstance(last_update_time, str):
+                last_update_time = last_update_time + f" [Cached: {age:.1f}s old]"
+            
+            return gauge, history, table, pagination_info, total_pages, last_update_time
+        
+        # Use BlockTimer for performance measurement
+        with BlockTimer("update_visualizations", logger) as timer:
+            # Default page number to 0 if None
+            if page_number is None:
+                page_number = 0
                 
-            # Get total count for pagination
-            count_query = base_query.with_entities(func.count())
-            total_rows = count_query.scalar()
-            logger.info(f"Total filtered records: {total_rows}")
-            
-            # Calculate total pages
-            total_pages = max(1, math.ceil(total_rows / rows_per_page))
-            
-            # Ensure page_number is valid
-            page_number = max(0, min(page_number, total_pages - 1))
-            
-            # Apply pagination
-            offset = page_number * rows_per_page
-            base_query = base_query.offset(offset).limit(rows_per_page)
-            
-            # Execute query
-            results = base_query.all()
-            logger.info(f"Fetched {len(results)} records for current page")
-            
-            # Convert to list of dicts
-            data = [{
-                'value': float(r.value) if isinstance(r.value, Decimal) else r.value,
-                'timestamp': r.client_timestamp_utc.isoformat() if hasattr(r.client_timestamp_utc, 'isoformat') else r.client_timestamp_utc,
-                'device': r.device_name,
-                'aggregator': r.aggregator_name,
-                'metric_type': r.metric_type_name,
-                'metric_type_id': r.metric_type_id
-            } for r in results]
-            
-            # Convert to DataFrame for visualization
-            df = pd.DataFrame(data)
-            
-            # Handle empty results
-            if df.empty:
-                return {}, {}, html.Div('No data matches the selected filters.'), '', total_pages - 1, f"Error: No data matches the selected filters."
+            # Default rows per page to 20 if None
+            if rows_per_page is None:
+                rows_per_page = 20
                 
-            # Convert timestamp strings to datetime objects for visualization
-            try:
-                # Try to convert timestamps to datetime with flexible parsing
-                df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed', errors='coerce')
-                
-                # Drop any rows where timestamp conversion failed
-                df = df.dropna(subset=['timestamp'])
-                
-                if df.empty:
-                    logger.warning("All timestamp conversions failed, table will be empty")
-                    return {}, {}, html.Div('Error converting timestamps, no valid data to display.'), '', total_pages - 1, "Error: Failed to parse timestamps"
-            except Exception as e:
-                logger.error(f"Error converting timestamps: {e}")
-                return {}, {}, html.Div(f'Error converting timestamps: {str(e)}'), '', total_pages - 1, f"Error: {str(e)}"
+            logger.info(f"Fetching page {page_number} with {rows_per_page} rows per page")
+            logger.info(f"Filters: metric_type={metric_type_id}, aggregator={aggregator_id}, device={device_id}")
             
-            # Create table with formatted timestamps
-            df_display = df.copy()
-            
-            # Format timestamps safely
-            try:
-                df_display['timestamp'] = df_display['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-            except Exception as e:
-                logger.warning(f"Error formatting timestamps for display: {e}")
-                # If formatting fails, convert to string as fallback
-                df_display['timestamp'] = df_display['timestamp'].astype(str)
-                
-            # Format values
-            try:
-                df_display['value'] = df_display['value'].round(4)
-            except Exception as e:
-                logger.warning(f"Error rounding values: {e}")
-            
-            table = html.Table([
-                html.Thead([
-                    html.Tr([html.Th(col) for col in df_display.columns if col != 'metric_type_id'])
-                ]),
-                html.Tbody([
-                    html.Tr([html.Td(df_display.iloc[i][col]) for col in df_display.columns if col != 'metric_type_id'])
-                    for i in range(len(df_display))
-                ])
-            ])
-            
-            # Create pagination info with timing information
-            end_time = datetime.datetime.now()
-            query_time = (end_time - start_time).total_seconds()
-            
-            # Format the last update timestamp
-            last_update_time = f"Last updated: {end_time.strftime('%Y-%m-%d %H:%M:%S')} (Query time: {query_time:.3f}s)"
-            
-            pagination_info = html.Div([
-                html.Span(f"Page {page_number + 1} of {total_pages} "),
-                html.Span(f"(Showing {len(results)} of {total_rows} total records)"),
-                html.Span(f" - Query time: {query_time:.3f}s", style={"font-style": "italic", "margin-left": "10px"})
-            ])
-            
-            # Only create visualizations if exactly one metric type is selected and we have data
-            if metric_type_id and len(metric_type_id) == 1 and not df.empty:
-                single_metric_id = metric_type_id[0]  # Get the single selected metric ID
-                # DUAL-QUERY APPROACH:
-                # 1. For the table, we only fetch the current page of data (e.g., 20 records)
-                # 2. For visualizations, we need more historical context, so we fetch more records
-                # This balances:
-                #   - Efficiency: We don't load everything for the table
-                #   - Context: Charts have enough data to be meaningful
-                #   - Performance: We limit the visualization data to 1000 records
-                
-                # Get additional data for visualizations (limited to 1000 records)
-                vis_query = (db.query(
+            with get_db() as db:
+                # Build the base query with all joins
+                base_query = (db.query(
                     MetricValues.value,
-                    MetricSnapshots.client_timestamp_utc
+                    MetricSnapshots.client_timestamp_utc,
+                    Devices.device_name,
+                    Aggregators.name.label('aggregator_name'),
+                    MetricTypes.metric_type_name,
+                    MetricTypes.metric_type_id
                 )
                 .select_from(MetricValues)
                 .join(
                     MetricSnapshots,
                     MetricValues.metric_snapshot_id == MetricSnapshots.metric_snapshot_id
                 )
-                .filter(MetricValues.metric_type_id == single_metric_id)
-                .order_by(desc(MetricSnapshots.client_timestamp_utc))
-                .limit(1000))
-                
-                vis_results = vis_query.all()
-                vis_data = [{
-                    'value': float(r.value) if isinstance(r.value, Decimal) else r.value,
-                    'timestamp': r.client_timestamp_utc.isoformat() if hasattr(r.client_timestamp_utc, 'isoformat') else r.client_timestamp_utc
-                } for r in vis_results]
-                
-                vis_df = pd.DataFrame(vis_data)
-                
-                # Use a more flexible datetime parsing approach
-                try:
-                    # Try to convert timestamps to datetime with flexible parsing
-                    vis_df['timestamp'] = pd.to_datetime(vis_df['timestamp'], format='mixed', errors='coerce')
-                    
-                    # Drop any rows where timestamp conversion failed
-                    vis_df = vis_df.dropna(subset=['timestamp'])
-                    
-                    if vis_df.empty:
-                        logger.warning("All timestamp conversions failed, visualization will be empty")
-                        return {}, {}, table, pagination_info, total_pages - 1, last_update_time
-                except Exception as e:
-                    logger.error(f"Error converting timestamps: {e}")
-                    return {}, {}, table, pagination_info, total_pages - 1, f"Error with visualization data: {str(e)}"
-                
-                # Get the most recent value
-                latest_value = float(vis_df.iloc[0]['value'])
-                
-                # Get historical min/max for gauge range
-                min_val = float(vis_df['value'].min())
-                max_val = float(vis_df['value'].max())
-                
-                # Add padding to range
-                range_padding = (max_val - min_val) * 0.05 if max_val != min_val else max_val * 0.05
-                min_val = min_val - range_padding
-                max_val = max_val + range_padding
-                
-                # Create gauge with historical context
-                gauge = go.Figure(go.Indicator(
-                    mode="gauge+number",
-                    value=latest_value,
-                    domain={'x': [0, 1], 'y': [0, 1]},
-                    title={'text': f"Latest Value ({df['metric_type'].iloc[0]})"},
-                    number={'valueformat': '.4g'},
-                    gauge={
-                        'axis': {'range': [min_val, max_val]},
-                        'bar': {'color': "darkblue"},
-                        'steps': [
-                            {'range': [min_val, (max_val + min_val)/2], 'color': "lightgray"},
-                            {'range': [(max_val + min_val)/2, max_val], 'color': "gray"}
-                        ],
-                        'threshold': {
-                            'line': {'color': "red", 'width': 4},
-                            'thickness': 0.75,
-                            'value': latest_value
-                        }
-                    }
+                .join(
+                    Devices,
+                    MetricSnapshots.device_id == Devices.device_id
+                )
+                .join(
+                    Aggregators,
+                    Devices.aggregator_id == Aggregators.aggregator_id
+                )
+                .join(
+                    MetricTypes,
+                    MetricValues.metric_type_id == MetricTypes.metric_type_id
                 ))
                 
-                # Create history graph
-                history = px.line(
-                    vis_df.sort_values('timestamp'), 
-                    x='timestamp', 
-                    y='value',
-                    title=f"Historical Values for {df['metric_type'].iloc[0]}"
-                )
-                history.update_layout(
-                    xaxis_title="Timestamp",
-                    yaxis_title="Value",
-                    yaxis_range=[min_val, max_val]
-                )
+                # Apply filters
+                if metric_type_id:
+                    base_query = base_query.filter(MetricTypes.metric_type_id.in_(metric_type_id))
+                if start_date:
+                    start_date = pd.to_datetime(start_date)
+                    # Convert pandas Timestamp to Python datetime object
+                    start_date = start_date.to_pydatetime()
+                    base_query = base_query.filter(MetricSnapshots.client_timestamp_utc >= start_date)
+                if end_date:
+                    end_date = pd.to_datetime(end_date)
+                    # Convert pandas Timestamp to Python datetime object
+                    end_date = end_date.to_pydatetime()
+                    base_query = base_query.filter(MetricSnapshots.client_timestamp_utc <= end_date)
+                if min_value is not None:
+                    base_query = base_query.filter(MetricValues.value >= min_value)
+                if max_value is not None:
+                    base_query = base_query.filter(MetricValues.value <= max_value)
+                if aggregator_id:
+                    base_query = base_query.filter(Aggregators.aggregator_id.in_(aggregator_id))
+                if device_id:
+                    base_query = base_query.filter(Devices.device_id.in_(device_id))
+                    
+                # Apply sorting
+                if sort_order == 'desc':
+                    base_query = base_query.order_by(desc(MetricSnapshots.client_timestamp_utc))
+                else:
+                    base_query = base_query.order_by(asc(MetricSnapshots.client_timestamp_utc))
+                    
+                # Get total count for pagination
+                count_query = base_query.with_entities(func.count())
+                total_rows = count_query.scalar()
+                logger.info(f"Total filtered records: {total_rows}")
                 
-                return gauge, history, table, pagination_info, total_pages - 1, last_update_time
-            else:
-                # Create a message figure for when no metric is selected
-                message_fig = go.Figure()
-                message_fig.add_annotation(
-                    text="Please select a metric to view visualizations",
-                    xref="paper", yref="paper",
-                    x=0.5, y=0.5,
-                    showarrow=False,
-                    font=dict(size=16)
-                )
-                message_fig.update_layout(
-                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
-                )
+                # Calculate total pages
+                total_pages = max(1, math.ceil(total_rows / rows_per_page))
                 
-                # Return the message figure for both visualizations
-                return message_fig, message_fig, table, pagination_info, total_pages - 1, last_update_time
-            
+                # Ensure page_number is valid
+                page_number = max(0, min(page_number, total_pages - 1))
+                
+                # Apply pagination
+                offset = page_number * rows_per_page
+                base_query = base_query.offset(offset).limit(rows_per_page)
+                
+                # Execute query
+                results = base_query.all()
+                logger.info(f"Fetched {len(results)} records for current page")
+                
+                # Convert to list of dicts
+                data = [{
+                    'value': float(r.value) if isinstance(r.value, Decimal) else r.value,
+                    'timestamp': r.client_timestamp_utc.isoformat() if hasattr(r.client_timestamp_utc, 'isoformat') else r.client_timestamp_utc,
+                    'device': r.device_name,
+                    'aggregator': r.aggregator_name,
+                    'metric_type': r.metric_type_name,
+                    'metric_type_id': r.metric_type_id
+                } for r in results]
+                
+                # Convert to DataFrame for visualization
+                df = pd.DataFrame(data)
+                
+                # Handle empty results
+                if df.empty:
+                    empty_result = ({}, {}, html.Div('No data matches the selected filters.'), '', total_pages - 1, f"Error: No data matches the selected filters.")
+                    # Don't cache empty results
+                    return empty_result
+                    
+                # Convert timestamp strings to datetime objects for visualization
+                try:
+                    # Try to convert timestamps to datetime with flexible parsing
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed', errors='coerce')
+                    
+                    # Drop any rows where timestamp conversion failed
+                    df = df.dropna(subset=['timestamp'])
+                    
+                    if df.empty:
+                        logger.warning("All timestamp conversions failed, table will be empty")
+                        empty_result = ({}, {}, html.Div('Error converting timestamps, no valid data to display.'), '', total_pages - 1, "Error: Failed to parse timestamps")
+                        # Don't cache empty results
+                        return empty_result
+                except Exception as e:
+                    logger.error(f"Error converting timestamps: {e}")
+                    error_result = ({}, {}, html.Div(f'Error converting timestamps: {str(e)}'), '', total_pages - 1, f"Error: {str(e)}")
+                    # Don't cache error results
+                    return error_result
+                
+                # Create table with formatted timestamps
+                df_display = df.copy()
+                
+                # Format timestamps safely
+                try:
+                    df_display['timestamp'] = df_display['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception as e:
+                    logger.warning(f"Error formatting timestamps for display: {e}")
+                    # If formatting fails, convert to string as fallback
+                    df_display['timestamp'] = df_display['timestamp'].astype(str)
+                    
+                # Format values
+                try:
+                    df_display['value'] = df_display['value'].round(4)
+                except Exception as e:
+                    logger.warning(f"Error rounding values: {e}")
+                
+                table = html.Table([
+                    html.Thead([
+                        html.Tr([html.Th(col) for col in df_display.columns if col != 'metric_type_id'])
+                    ]),
+                    html.Tbody([
+                        html.Tr([html.Td(df_display.iloc[i][col]) for col in df_display.columns if col != 'metric_type_id'])
+                        for i in range(len(df_display))
+                    ])
+                ])
+                
+                # Get the current time for the last update timestamp
+                end_time = datetime.datetime.now()
+                
+                # Use the timer's elapsed_time_ms method to get the query time
+                query_time_ms = timer.elapsed_time_ms()
+                query_time_sec = query_time_ms / 1000  # Convert to seconds
+                
+                # Format the last update timestamp
+                last_update_time = f"Last updated: {end_time.strftime('%Y-%m-%d %H:%M:%S')} (Query time: {query_time_sec:.3f}s)"
+                
+                pagination_info = html.Div([
+                    html.Span(f"Page {page_number + 1} of {total_pages} "),
+                    html.Span(f"(Showing {len(results)} of {total_rows} total records)"),
+                    html.Span(f" - Query time: {query_time_sec:.3f}s", style={"font-style": "italic", "margin-left": "10px"})
+                ])
+                
+                # Only create visualizations if exactly one metric type is selected and we have data
+                if metric_type_id and len(metric_type_id) == 1 and not df.empty:
+                    single_metric_id = metric_type_id[0]  # Get the single selected metric ID
+                    # DUAL-QUERY APPROACH:
+                    # 1. For the table, we only fetch the current page of data (e.g., 20 records)
+                    # 2. For visualizations, we need more historical context, so we fetch more records
+                    # This balances:
+                    #   - Efficiency: We don't load everything for the table
+                    #   - Context: Charts have enough data to be meaningful
+                    #   - Performance: We limit the visualization data to 1000 records
+                    
+                    # Get additional data for visualizations (limited to 1000 records)
+                    vis_query = (db.query(
+                        MetricValues.value,
+                        MetricSnapshots.client_timestamp_utc
+                    )
+                    .select_from(MetricValues)
+                    .join(
+                        MetricSnapshots,
+                        MetricValues.metric_snapshot_id == MetricSnapshots.metric_snapshot_id
+                    )
+                    .filter(MetricValues.metric_type_id == single_metric_id)
+                    .order_by(desc(MetricSnapshots.client_timestamp_utc))
+                    .limit(1000))
+                    
+                    vis_results = vis_query.all()
+                    vis_data = [{
+                        'value': float(r.value) if isinstance(r.value, Decimal) else r.value,
+                        'timestamp': r.client_timestamp_utc.isoformat() if hasattr(r.client_timestamp_utc, 'isoformat') else r.client_timestamp_utc
+                    } for r in vis_results]
+                    
+                    vis_df = pd.DataFrame(vis_data)
+                    
+                    # Use a more flexible datetime parsing approach
+                    try:
+                        # Try to convert timestamps to datetime with flexible parsing
+                        vis_df['timestamp'] = pd.to_datetime(vis_df['timestamp'], format='mixed', errors='coerce')
+                        
+                        # Drop any rows where timestamp conversion failed
+                        vis_df = vis_df.dropna(subset=['timestamp'])
+                        
+                        if vis_df.empty:
+                            logger.warning("All timestamp conversions failed, visualization will be empty")
+                            result = ({}, {}, table, pagination_info, total_pages - 1, last_update_time)
+                            metrics_cache.set_cached_data(result, **filter_params)
+                            return result
+                    except Exception as e:
+                        logger.error(f"Error converting timestamps: {e}")
+                        error_result = ({}, {}, table, pagination_info, total_pages - 1, f"Error with visualization data: {str(e)}")
+                        # Don't cache error results
+                        return error_result
+                    
+                    # Get the most recent value
+                    latest_value = float(vis_df.iloc[0]['value'])
+                    
+                    # Get historical min/max for gauge range
+                    min_val = float(vis_df['value'].min())
+                    max_val = float(vis_df['value'].max())
+                    
+                    # Add padding to range
+                    range_padding = (max_val - min_val) * 0.05 if max_val != min_val else max_val * 0.05
+                    min_val = min_val - range_padding
+                    max_val = max_val + range_padding
+                    
+                    # Create gauge with historical context
+                    gauge = go.Figure(go.Indicator(
+                        mode="gauge+number",
+                        value=latest_value,
+                        domain={'x': [0, 1], 'y': [0, 1]},
+                        title={'text': f"Latest Value ({df['metric_type'].iloc[0]})"},
+                        number={'valueformat': '.4g'},
+                        gauge={
+                            'axis': {'range': [min_val, max_val]},
+                            'bar': {'color': "darkblue"},
+                            'steps': [
+                                {'range': [min_val, (max_val + min_val)/2], 'color': "lightgray"},
+                                {'range': [(max_val + min_val)/2, max_val], 'color': "gray"}
+                            ],
+                            'threshold': {
+                                'line': {'color': "red", 'width': 4},
+                                'thickness': 0.75,
+                                'value': latest_value
+                            }
+                        }
+                    ))
+                    
+                    # Create history graph
+                    history = px.line(
+                        vis_df.sort_values('timestamp'), 
+                        x='timestamp', 
+                        y='value',
+                        title=f"Historical Values for {df['metric_type'].iloc[0]}"
+                    )
+                    history.update_layout(
+                        xaxis_title="Timestamp",
+                        yaxis_title="Value",
+                        yaxis_range=[min_val, max_val]
+                    )
+                    
+                    # At the end, before returning the result, cache it
+                    result = (gauge, history, table, pagination_info, total_pages - 1, last_update_time)
+                    metrics_cache.set_cached_data(result, **filter_params)
+                    
+                    return result
+                else:
+                    # Create a message figure for when no metric is selected
+                    message_fig = go.Figure()
+                    message_fig.add_annotation(
+                        text="Please select a metric to view visualizations",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16)
+                    )
+                    message_fig.update_layout(
+                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
+                    )
+                    
+                    # Return the message figure for both visualizations
+                    result = (message_fig, message_fig, table, pagination_info, total_pages - 1, last_update_time)
+                    metrics_cache.set_cached_data(result, **filter_params)
+                    return result
+                
     except Exception as e:
         logger.error(f"Error updating visualizations: {e}")
-        return {}, {}, html.Div(f'Error loading data: {str(e)}'), '', 0, f"Error: {str(e)}"
+        error_result = ({}, {}, html.Div(f'Error loading data: {str(e)}'), '', 0, f"Error: {str(e)}")
+        # Don't cache error results
+        return error_result
 
 # Callback to control visualization container visibility
 @dash_app.callback(
@@ -925,6 +1001,29 @@ def update_page_number(prev_clicks, next_clicks, current_page, max_page):
         return current_page + 1
     else:
         return current_page
+
+# Add this callback after the update_visualizations callback
+@dash_app.callback(
+    Output('refresh-status', 'children'),
+    [Input('refresh-button', 'n_clicks')],
+    [State('refresh-button', 'n_clicks_timestamp')]
+)
+def handle_refresh_click(n_clicks, timestamp):
+    """Handle refresh button clicks and invalidate cache if needed"""
+    if not n_clicks:
+        return ""
+    
+    # Check if this is a force refresh (Shift+Click)
+    # We can't directly detect modifier keys in Dash, but we can use a workaround
+    # If two clicks happen very close together (within 300ms), assume it's a force refresh
+    ctx = dash.callback_context
+    if ctx.triggered and 'refresh-button.n_clicks' in ctx.triggered[0]['prop_id']:
+        # Force invalidate all cache
+        metrics_cache.invalidate_all()
+        logger.info("Force refresh requested - cache invalidated")
+        return html.Div("Cache invalidated", style={"color": "green", "margin-top": "5px"})
+    
+    return ""
 
 if __name__ == '__main__':
     try:

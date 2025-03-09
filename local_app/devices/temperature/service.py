@@ -14,8 +14,13 @@ class TemperatureService(BaseDevice):
         )
         self.city = "London"
         
-    def get_current_temperature(self) -> float:
-        """Get current temperature in London using WeatherAPI"""
+    def get_current_temperature(self) -> Optional[float]:
+        """
+        Get current temperature in London using WeatherAPI
+        
+        Returns:
+            Optional[float]: The current temperature in Celsius, or None if the API call fails
+        """
         url = f"https://wttr.in/{self.city}?format=j1"
         
         try:
@@ -29,24 +34,39 @@ class TemperatureService(BaseDevice):
             
         except Exception as e:
             self.logger.error(f"Error fetching temperature for {self.city}: {e}")
-            # Return a reasonable default if API fails
-            return 20.0
+            # Return None instead of a default value to indicate failure
+            return None
             
     def get_current_metrics(self) -> List[MetricDTO]:
-        """Get current metrics"""
+        """
+        Get current metrics
+        
+        Returns:
+            List[MetricDTO]: List containing the temperature metric, or an empty list if data is unavailable
+        """
         temperature = self.get_current_temperature()
-        metric = self.create_metric(temperature)
-        return [metric]
+        
+        # Only create and return a metric if we have valid data
+        if temperature is not None:
+            metric = self.create_metric(temperature)
+            return [metric]
+        else:
+            self.logger.warning("No temperature data available to report")
+            return []
         
     def run(self):
         """Run the temperature service"""
         while self._running:
             try:
                 temperature = self.get_current_temperature()
-                metric = self.create_metric(temperature)
-                metric.type = "Temperature"  # Use the same type as the device
                 
-                self.publish_metrics([metric])
+                # Only publish metrics if we have valid data
+                if temperature is not None:
+                    metric = self.create_metric(temperature)
+                    metric.type = "Temperature"  # Use the same type as the device
+                    self.publish_metrics([metric])
+                else:
+                    self.logger.warning("Skipping metric publication due to unavailable temperature data")
                 
             except Exception as e:
                 self.logger.error(f"Error in temperature service: {e}")
