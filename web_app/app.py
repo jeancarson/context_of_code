@@ -39,6 +39,7 @@ from dash.exceptions import PreventUpdate
 import json
 import threading
 from lib_utils.blocktimer import BlockTimer
+from web_app.metrics_cache import MetricsCache
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -64,6 +65,9 @@ dash_app = Dash(
     suppress_callback_exceptions=True,
     title="JEAN"
 )
+
+# Initialize the metrics cache with a 30-second duration
+metrics_cache = MetricsCache(cache_duration_seconds=30)
 
 # Define the Dash layout with routing
 dash_app.layout = html.Div([
@@ -138,6 +142,9 @@ def display_page(pathname):
                     className='refresh-button-prominent', 
                     n_clicks=0
                 ),
+                
+                # Add refresh status div
+                html.Div(id='refresh-status', className='refresh-status'),
                 
                 # Last update time display
                 html.Div(id='last-update-time', className='update-info')
@@ -591,9 +598,46 @@ def populate_dropdowns(_, n_clicks):
 )
 def update_visualizations(metric_type_id, start_date, end_date, min_value, max_value,
                          aggregator_id, device_id, sort_order, page_number, rows_per_page, n_clicks):
-    """Server-side filtering and pagination of data"""
+    """Server-side filtering and pagination of data with caching"""
     try:
-        # Use BlockTimer instead of manual timing
+        # Create a dictionary of all filter parameters for cache key generation
+        filter_params = {
+            'metric_type_id': metric_type_id,
+            'start_date': start_date,
+            'end_date': end_date,
+            'min_value': min_value,
+            'max_value': max_value,
+            'aggregator_id': aggregator_id,
+            'device_id': device_id,
+            'sort_order': sort_order,
+            'page_number': page_number,
+            'rows_per_page': rows_per_page,
+            'n_clicks': n_clicks  # This will be ignored in cache key generation
+        }
+        
+        # Check if we have a cache hit
+        cached_result = metrics_cache.get_cached_data(**filter_params)
+        
+        # If we have a cache hit and it's not a refresh button click, use cached data
+        if cached_result is not None:
+            cached_data, age = cached_result
+            
+            # If refresh button was clicked, check if we're within cooldown period
+            if dash.callback_context.triggered and 'refresh-button.n_clicks' in dash.callback_context.triggered[0]['prop_id']:
+                logger.info(f"Refresh button clicked, but using cached data (age: {age:.1f}s)")
+            else:
+                logger.info(f"Using cached data for unchanged filters (age: {age:.1f}s)")
+            
+            # Add cache status to the last update time
+            gauge, history, table, pagination_info, total_pages, last_update_time = cached_data
+            
+            # Update the last update time to show it's from cache
+            if isinstance(last_update_time, str):
+                last_update_time = last_update_time + f" [Cached: {age:.1f}s old]"
+            
+            return gauge, history, table, pagination_info, total_pages, last_update_time
+        
+        # Use BlockTimer for performance measurement
         with BlockTimer("update_visualizations", logger) as timer:
             # Default page number to 0 if None
             if page_number is None:
@@ -692,7 +736,9 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                 
                 # Handle empty results
                 if df.empty:
-                    return {}, {}, html.Div('No data matches the selected filters.'), '', total_pages - 1, f"Error: No data matches the selected filters."
+                    empty_result = ({}, {}, html.Div('No data matches the selected filters.'), '', total_pages - 1, f"Error: No data matches the selected filters.")
+                    # Don't cache empty results
+                    return empty_result
                     
                 # Convert timestamp strings to datetime objects for visualization
                 try:
@@ -704,10 +750,14 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                     
                     if df.empty:
                         logger.warning("All timestamp conversions failed, table will be empty")
-                        return {}, {}, html.Div('Error converting timestamps, no valid data to display.'), '', total_pages - 1, "Error: Failed to parse timestamps"
+                        empty_result = ({}, {}, html.Div('Error converting timestamps, no valid data to display.'), '', total_pages - 1, "Error: Failed to parse timestamps")
+                        # Don't cache empty results
+                        return empty_result
                 except Exception as e:
                     logger.error(f"Error converting timestamps: {e}")
-                    return {}, {}, html.Div(f'Error converting timestamps: {str(e)}'), '', total_pages - 1, f"Error: {str(e)}"
+                    error_result = ({}, {}, html.Div(f'Error converting timestamps: {str(e)}'), '', total_pages - 1, f"Error: {str(e)}")
+                    # Don't cache error results
+                    return error_result
                 
                 # Create table with formatted timestamps
                 df_display = df.copy()
@@ -795,10 +845,14 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                         
                         if vis_df.empty:
                             logger.warning("All timestamp conversions failed, visualization will be empty")
-                            return {}, {}, table, pagination_info, total_pages - 1, last_update_time
+                            result = ({}, {}, table, pagination_info, total_pages - 1, last_update_time)
+                            metrics_cache.set_cached_data(result, **filter_params)
+                            return result
                     except Exception as e:
                         logger.error(f"Error converting timestamps: {e}")
-                        return {}, {}, table, pagination_info, total_pages - 1, f"Error with visualization data: {str(e)}"
+                        error_result = ({}, {}, table, pagination_info, total_pages - 1, f"Error with visualization data: {str(e)}")
+                        # Don't cache error results
+                        return error_result
                     
                     # Get the most recent value
                     latest_value = float(vis_df.iloc[0]['value'])
@@ -847,7 +901,11 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                         yaxis_range=[min_val, max_val]
                     )
                     
-                    return gauge, history, table, pagination_info, total_pages - 1, last_update_time
+                    # At the end, before returning the result, cache it
+                    result = (gauge, history, table, pagination_info, total_pages - 1, last_update_time)
+                    metrics_cache.set_cached_data(result, **filter_params)
+                    
+                    return result
                 else:
                     # Create a message figure for when no metric is selected
                     message_fig = go.Figure()
@@ -864,11 +922,15 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                     )
                     
                     # Return the message figure for both visualizations
-                    return message_fig, message_fig, table, pagination_info, total_pages - 1, last_update_time
+                    result = (message_fig, message_fig, table, pagination_info, total_pages - 1, last_update_time)
+                    metrics_cache.set_cached_data(result, **filter_params)
+                    return result
                 
     except Exception as e:
         logger.error(f"Error updating visualizations: {e}")
-        return {}, {}, html.Div(f'Error loading data: {str(e)}'), '', 0, f"Error: {str(e)}"
+        error_result = ({}, {}, html.Div(f'Error loading data: {str(e)}'), '', 0, f"Error: {str(e)}")
+        # Don't cache error results
+        return error_result
 
 # Callback to control visualization container visibility
 @dash_app.callback(
@@ -928,6 +990,29 @@ def update_page_number(prev_clicks, next_clicks, current_page, max_page):
         return current_page + 1
     else:
         return current_page
+
+# Add this callback after the update_visualizations callback
+@dash_app.callback(
+    Output('refresh-status', 'children'),
+    [Input('refresh-button', 'n_clicks')],
+    [State('refresh-button', 'n_clicks_timestamp')]
+)
+def handle_refresh_click(n_clicks, timestamp):
+    """Handle refresh button clicks and invalidate cache if needed"""
+    if not n_clicks:
+        return ""
+    
+    # Check if this is a force refresh (Shift+Click)
+    # We can't directly detect modifier keys in Dash, but we can use a workaround
+    # If two clicks happen very close together (within 300ms), assume it's a force refresh
+    ctx = dash.callback_context
+    if ctx.triggered and 'refresh-button.n_clicks' in ctx.triggered[0]['prop_id']:
+        # Force invalidate all cache
+        metrics_cache.invalidate_all()
+        logger.info("Force refresh requested - cache invalidated")
+        return html.Div("Cache invalidated", style={"color": "green", "margin-top": "5px"})
+    
+    return ""
 
 if __name__ == '__main__':
     try:
