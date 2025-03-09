@@ -5,7 +5,8 @@
     "intervals": {
         "local": 20,
         "temperature": 3600,
-        "exchange_rate": 3600
+        "exchange_rate": 3600,
+        "send": 15
     },
     "logging": {
         "console": {

@@ -1,4 +1,10 @@
 import os
+import sys
+
+# Add the project root directory to the Python path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
+
 import uuid
 import datetime
 import requests
@@ -15,7 +21,6 @@ from web_app.lib.database import init_db, get_db
 from web_app.lib.models.generated_models import Aggregators, Devices, MetricTypes, MetricSnapshots, MetricValues, Visits
 from web_app.lib.constants import StatusCode, HTTPStatusCode
 from sqlalchemy import select, func, and_, desc, asc, text
-import sys
 from web_app.lib.models.dto import (
     AggregatorDTO, DeviceDTO, MetricTypeDTO, MetricSnapshotDTO, MetricValueDTO,
     convert_to_snapshot_orm, convert_to_metric_value_orm
@@ -685,9 +690,13 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                     base_query = base_query.filter(MetricTypes.metric_type_id.in_(metric_type_id))
                 if start_date:
                     start_date = pd.to_datetime(start_date)
+                    # Convert pandas Timestamp to Python datetime object
+                    start_date = start_date.to_pydatetime()
                     base_query = base_query.filter(MetricSnapshots.client_timestamp_utc >= start_date)
                 if end_date:
                     end_date = pd.to_datetime(end_date)
+                    # Convert pandas Timestamp to Python datetime object
+                    end_date = end_date.to_pydatetime()
                     base_query = base_query.filter(MetricSnapshots.client_timestamp_utc <= end_date)
                 if min_value is not None:
                     base_query = base_query.filter(MetricValues.value >= min_value)
