@@ -40,14 +40,16 @@ import json
 import threading
 from lib_utils.blocktimer import BlockTimer
 from web_app.metrics_cache import MetricsCache
+from lib_utils.logger import Logger
 
 # Compute root directory once and use it throughout the file
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Initialize logging first
-logger = logging.getLogger(__name__)
+# Initialize configuration first
 config = Config(os.path.join(ROOT_DIR, 'config.json'))
-config.setup_logging()
+
+# Initialize logging using the shared logger
+logger = Logger.setup_from_config("Web App", config)
 
 # Initialize services
 ip_service = IPService()
