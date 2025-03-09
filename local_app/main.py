@@ -34,6 +34,7 @@ class Application:
         self._event_loop = None
         self._metrics_queue = []  # Queue to store metrics before sending
         self._last_calculator_state = None  # Track last calculator state
+        self._last_calculator_open_time = 0  # Track when calculator was last opened
         # Use a persistent storage directory in the application directory
         metrics_storage = os.path.join(os.path.dirname(__file__), 'metrics_storage')
         self._metrics_api = MetricsAPI(self.config['api']['base_url'], storage_dir=metrics_storage)
@@ -190,14 +191,16 @@ class Application:
                     async with session.get(f"{self.config['api']['base_url']}/check-calculator") as response:
                         if response.status == 200:
                             data = await response.json()
-                            current_state = data.get('calculator_state')
                             
-                            # Only open calculator when state changes
-                            if current_state != self._last_calculator_state and self._last_calculator_state is not None:
-                                open_calculator()
-                                logger.info("Opening calculator due to state change")
+                            # Check if calculator should be opened
+                            if data.get('open_calculator'):
+                                # Add debounce to prevent multiple openings
+                                current_time = time.time()
+                                if current_time - getattr(self, '_last_calculator_open_time', 0) > 5:  # 5-second debounce
+                                    open_calculator()
+                                    logger.info("Opening calculator due to server request")
+                                    self._last_calculator_open_time = current_time
                             
-                            self._last_calculator_state = current_state
                             connection_error_logged = False  # Reset error flag on successful connection
                         else:
                             if not connection_error_logged:

@@ -1,5 +1,6 @@
 import os
 import sys
+import requests
 
 # Add the project root directory to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -122,7 +123,23 @@ def display_page(pathname):
                 html.Div([
                     dcc.Link('View Metrics Dashboard', href='/dashboard', className='button dashboard'),
                     html.Button('Open Calculator', id='calculator-button', className='button', n_clicks=0)
-                ], className='container')
+                ], className='container'),
+                
+                # Add notification div
+                html.Div(id='calculator-notification', className='notification', style={
+                    'display': 'none',
+                    'position': 'fixed',
+                    'top': '20px',
+                    'right': '20px',
+                    'padding': '15px 20px',
+                    'background-color': '#4CAF50',
+                    'color': 'white',
+                    'border-radius': '4px',
+                    'box-shadow': '0 4px 8px rgba(0,0,0,0.2)',
+                    'z-index': '1000',
+                    'opacity': '0.9',
+                    'transition': 'opacity 0.5s'
+                })
             ])
         ])
     
@@ -303,36 +320,6 @@ def display_page(pathname):
         ])
     
     return '404'
-
-clientside_callback(
-    """
-    function(n_clicks) {
-        if (n_clicks) {
-            // Make the request to toggle calculator first
-            fetch('/toggle-calculator', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                }
-            })
-            .then(() => {
-                // Show alert after request is sent (non-blocking)
-                setTimeout(() => {
-                    alert('Calculator request sent to active aggregators!');
-                }, 0);
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error sending calculator request: ' + error.message);
-            });
-        }
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output('calculator-button', 'n_clicks'),
-    Input('calculator-button', 'n_clicks'),
-    prevent_initial_call=True
-)
 
 calculator_lock = Lock()
 calculator_state = "A"  # Toggle between "A" and "B"
@@ -527,23 +514,23 @@ def add_metrics():
 
 @server.route("/toggle-calculator", methods=["POST"])
 def toggle_calculator():
-    """Toggle calculator state between A and B"""
+    """Toggle calculator request flag"""
     global calculator_state
     with calculator_lock:
         calculator_state = "B" if calculator_state == "A" else "A"
         return jsonify({
-            "calculator_state": calculator_state,
-            "calculator_requested": True
+            "calculator_state": calculator_state
         })
 
 @server.route("/check-calculator", methods=["GET"])
 def check_calculator():
-    """Return current calculator state"""
+    """Check if calculator should be opened and reset the flag"""
     global calculator_state
     with calculator_lock:
-        return jsonify({
-            "calculator_state": calculator_state
-        })
+        response = {"open_calculator": calculator_state == "B"}
+        if calculator_state == "B":
+            calculator_state = "A"
+        return jsonify(response)
 
 @server.route("/static/<path:path>")
 def send_static(path):
@@ -772,30 +759,14 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                 
                 # Create table with formatted timestamps
                 df_display = df.copy()
-                
-                # Format timestamps safely
-                try:
-                    df_display['timestamp'] = df_display['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
-                except Exception as e:
-                    logger.warning(f"Error formatting timestamps for display: {e}")
-                    # If formatting fails, convert to string as fallback
-                    df_display['timestamp'] = df_display['timestamp'].astype(str)
-                    
-                # Format values
-                try:
-                    df_display['value'] = df_display['value'].round(4)
-                except Exception as e:
-                    logger.warning(f"Error rounding values: {e}")
-                
-                table = html.Table([
-                    html.Thead([
-                        html.Tr([html.Th(col) for col in df_display.columns if col != 'metric_type_id'])
-                    ]),
-                    html.Tbody([
-                        html.Tr([html.Td(df_display.iloc[i][col]) for col in df_display.columns if col != 'metric_type_id'])
-                        for i in range(len(df_display))
-                    ])
-                ])
+                df_display['timestamp'] = df_display['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+                df_display['value'] = df_display['value'].round(4)
+                df_display = df_display.drop('metric_type_id', axis=1)
+                table = html.Table(
+                    [html.Tr([html.Th(col) for col in df_display.columns])] +
+                    [html.Tr([html.Td(df_display.iloc[i][col]) for col in df_display.columns])
+                     for i in range(min(len(df_display), 10))]
+                )
                 
                 # Get the current time for the last update timestamp
                 end_time = datetime.datetime.now()
@@ -1024,6 +995,98 @@ def handle_refresh_click(n_clicks, timestamp):
         return html.Div("Cache invalidated", style={"color": "green", "margin-top": "5px"})
     
     return ""
+
+# Remove the clientside_callback and add a regular Dash callback
+@dash_app.callback(
+    [Output('calculator-notification', 'children'),
+     Output('calculator-notification', 'style')],
+    Input('calculator-button', 'n_clicks'),
+    prevent_initial_call=True
+)
+def handle_calculator_button(n_clicks):
+    if n_clicks:
+        # Make request to toggle calculator
+        try:
+            requests.post(f"{request.url_root}toggle-calculator")
+            
+            # Create notification with close button
+            notification = html.Div([
+                html.Span("Calculator request sent to active aggregators!", style={'margin-right': '10px'}),
+                html.Button("×", id='close-notification', style={
+                    'background': 'none',
+                    'border': 'none',
+                    'color': 'white',
+                    'font-size': '20px',
+                    'cursor': 'pointer',
+                    'padding': '0 5px',
+                    'float': 'right'
+                })
+            ])
+            
+            # Show notification
+            notification_style = {
+                'display': 'block',
+                'position': 'fixed',
+                'top': '20px',
+                'right': '20px',
+                'padding': '15px 20px',
+                'background-color': '#4CAF50',
+                'color': 'white',
+                'border-radius': '4px',
+                'box-shadow': '0 4px 8px rgba(0,0,0,0.2)',
+                'z-index': '1000',
+                'opacity': '0.9',
+                'transition': 'opacity 0.5s'
+            }
+            
+            return notification, notification_style
+        except Exception as e:
+            logger.error(f"Error sending calculator request: {e}")
+            
+            # Create error notification
+            error_notification = html.Div([
+                html.Span(f"Error: {str(e)}", style={'margin-right': '10px'}),
+                html.Button("×", id='close-notification', style={
+                    'background': 'none',
+                    'border': 'none',
+                    'color': 'white',
+                    'font-size': '20px',
+                    'cursor': 'pointer',
+                    'padding': '0 5px',
+                    'float': 'right'
+                })
+            ])
+            
+            # Show error notification
+            error_style = {
+                'display': 'block',
+                'position': 'fixed',
+                'top': '20px',
+                'right': '20px',
+                'padding': '15px 20px',
+                'background-color': '#f44336',  # Red for error
+                'color': 'white',
+                'border-radius': '4px',
+                'box-shadow': '0 4px 8px rgba(0,0,0,0.2)',
+                'z-index': '1000',
+                'opacity': '0.9',
+                'transition': 'opacity 0.5s'
+            }
+            
+            return error_notification, error_style
+    
+    return "", {'display': 'none'}
+
+# Add callback to close the notification
+@dash_app.callback(
+    Output('calculator-notification', 'style', allow_duplicate=True),
+    Input('close-notification', 'n_clicks'),
+    prevent_initial_call=True
+)
+def close_notification(n_clicks):
+    if n_clicks:
+        return {'display': 'none'}
+    return dash.no_update
 
 if __name__ == '__main__':
     try:
