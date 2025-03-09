@@ -605,29 +605,34 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
             'device_id': device_id,
             'sort_order': sort_order,
             'page_number': page_number,
-            'rows_per_page': rows_per_page,
-            'n_clicks': n_clicks  # This will be ignored in cache key generation
+            'rows_per_page': rows_per_page
         }
         
         # Check if we have a cache hit
         cached_result = metrics_cache.get_cached_data(**filter_params)
         
-        # If we have a cache hit and it's not a refresh button click, use cached data
+        # If we have a cache hit, use cached data regardless of refresh button
         if cached_result is not None:
             cached_data, age = cached_result
             
-            # If refresh button was clicked, check if we're within cooldown period
-            if dash.callback_context.triggered and 'refresh-button.n_clicks' in dash.callback_context.triggered[0]['prop_id']:
-                logger.info(f"Refresh button clicked, but using cached data (age: {age:.1f}s)")
-            else:
-                logger.info(f"Using cached data for unchanged filters (age: {age:.1f}s)")
+            logger.info(f"Using cached data (age: {age:.1f}s)")
             
-            # Add cache status to the last update time
-            gauge, history, table, pagination_info, total_pages, last_update_time = cached_data
+            # Unpack the cached data
+            gauge, history, table, pagination_info, total_pages, original_update_time = cached_data
             
-            # Update the last update time to show it's from cache
-            if isinstance(last_update_time, str):
-                last_update_time = last_update_time + f" [Cached: {age:.1f}s old]"
+            # Update the last update time to show it's from cache and include the original query time
+            # Extract the original query time if it exists
+            query_time_info = ""
+            if isinstance(original_update_time, str) and "Query time:" in original_update_time:
+                query_time_parts = original_update_time.split("Query time:")
+                if len(query_time_parts) > 1:
+                    query_time_info = f"Query time:{query_time_parts[1].split(')')[0]})"
+            
+            # Format the timestamp part
+            timestamp_part = original_update_time.split(" (")[0] if " (" in original_update_time else original_update_time
+            
+            # Create the updated message
+            last_update_time = f"{timestamp_part} ({query_time_info} [Cached: {age:.1f}s old]"
             
             return gauge, history, table, pagination_info, total_pages, last_update_time
         
@@ -973,28 +978,19 @@ def update_page_number(prev_clicks, next_clicks, current_page, max_page):
     else:
         return current_page
 
-# Add this callback after the update_visualizations callback
+# Replace the existing refresh button callback with this simplified version
 @dash_app.callback(
     Output('refresh-status', 'children'),
-    [Input('refresh-button', 'n_clicks')],
-    [State('refresh-button', 'n_clicks_timestamp')]
+    [Input('refresh-button', 'n_clicks')]
 )
-def handle_refresh_click(n_clicks, timestamp):
-    """Handle refresh button clicks and invalidate cache if needed"""
+def handle_refresh_click(n_clicks):
+    """Handle refresh button clicks - just show a status message"""
     if not n_clicks:
         return ""
     
-    # Check if this is a force refresh (Shift+Click)
-    # We can't directly detect modifier keys in Dash, but we can use a workaround
-    # If two clicks happen very close together (within 300ms), assume it's a force refresh
-    ctx = dash.callback_context
-    if ctx.triggered and 'refresh-button.n_clicks' in ctx.triggered[0]['prop_id']:
-        # Force invalidate all cache
-        metrics_cache.invalidate_all()
-        logger.info("Force refresh requested - cache invalidated")
-        return html.Div("Cache invalidated", style={"color": "green", "margin-top": "5px"})
-    
-    return ""
+    # Simply indicate that refresh was requested, but don't invalidate cache
+    return html.Div("Refresh requested - using cached data if available", 
+                   style={"color": "green", "margin-top": "5px", "font-style": "italic"})
 
 # Remove the clientside_callback and add a regular Dash callback
 @dash_app.callback(
