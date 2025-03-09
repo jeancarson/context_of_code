@@ -4,6 +4,7 @@ from ..models.generated_models import Devices, MetricTypes, MetricSnapshots, Met
 from typing import List, Dict, Any
 from datetime import datetime
 import logging
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +78,34 @@ def get_recent_metrics(db: Session, limit: int = 100) -> List[Dict[str, Any]]:
         .all()
     )
     
+    def convert_timestamp(client_timestamp_str: str, client_offset: int, server_offset: int) -> str:
+        """Convert client timestamp to server local time"""
+        try:
+            # Parse the client timestamp
+            client_time = datetime.fromisoformat(client_timestamp_str.replace('Z', '+00:00'))
+            
+            # Add client offset to get UTC (if timestamp wasn't already UTC)
+            if not client_timestamp_str.endswith('Z'):
+                client_time = client_time + timedelta(minutes=client_offset)
+            
+            # Subtract server offset to get server local time
+            server_time = client_time - timedelta(minutes=server_offset)
+            
+            return server_time.isoformat()
+        except Exception as e:
+            logger.error(f"Error converting timestamp {client_timestamp_str}: {e}")
+            return client_timestamp_str
+    
     return [{
         'device_uuid': device.device_uuid,
         'device_name': device.device_name,
         'metric_type': type.metric_type_name,
         'value': float(value.value),
-        'timestamp': snapshot.server_timestamp_utc
+        'timestamp': convert_timestamp(
+            snapshot.client_timestamp_utc,
+            snapshot.client_timezone_minutes,
+            snapshot.server_timezone_minutes
+        )
     } for snapshot, device, value, type in metrics]
 
 def get_all_visits(db: Session) -> List[Dict[str, Any]]:
