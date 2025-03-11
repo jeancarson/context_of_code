@@ -45,7 +45,7 @@ from dash.exceptions import PreventUpdate
 import json
 import threading
 from lib_utils.blocktimer import BlockTimer
-from web_app.metrics_cache import MetricsCache
+from web_app.lib.utils.metrics_cache import MetricsCache
 from lib_utils.logger import Logger
 
 # Compute root directory once and use it throughout the file

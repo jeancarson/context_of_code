@@ -4,6 +4,7 @@ import logging
 import hashlib
 import json
 from typing import Dict, Any, Tuple, Optional
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,42 @@ class MetricsCache:
             cache_duration_seconds: How long to keep cached results (default: 30 seconds)
         """
         self.cache_duration = cache_duration_seconds
-        self.cache_lock = threading.Lock()
         self.cache: Dict[str, Tuple[float, Any]] = {}  # {cache_key: (timestamp, data)}
+        self.cache_lock = threading.Lock()
+        # Track which thread has the lock and when it was acquired
+        self.lock_owner = None
+        self.lock_acquire_time = None
+        # Maximum time a thread can hold the lock (in seconds)
+        self.max_lock_time = 10 
+    
+    @contextmanager
+    def safe_lock(self):
+        """Context manager that handles lock timeouts and forced release"""
+        try:
+            # Check if lock is stuck
+            if self.lock_owner is not None:
+                current_time = time.time()
+                if current_time - self.lock_acquire_time > self.max_lock_time:
+                    logger.warning(f"Lock held by thread {self.lock_owner} for > {self.max_lock_time}s. Forcing release.")
+                    # Force release the lock
+                    self.cache_lock = threading.Lock()
+                    self.lock_owner = None
+                    self.lock_acquire_time = None
+            
+            # Try to acquire the lock
+            self.cache_lock.acquire()
+            # Track lock ownership
+            self.lock_owner = threading.current_thread().ident
+            self.lock_acquire_time = time.time()
+            
+            yield
+            
+        finally:
+            # Only release if we're the owner
+            if self.lock_owner == threading.current_thread().ident:
+                self.lock_owner = None
+                self.lock_acquire_time = None
+                self.cache_lock.release()
     
     def _generate_cache_key(self, **filter_params) -> str:
         """
@@ -57,7 +92,7 @@ class MetricsCache:
         """
         cache_key = self._generate_cache_key(**filter_params)
         
-        with self.cache_lock:
+        with self.safe_lock():
             if cache_key in self.cache:
                 timestamp, data = self.cache[cache_key]
                 current_time = time.time()
@@ -84,7 +119,7 @@ class MetricsCache:
         """
         cache_key = self._generate_cache_key(**filter_params)
         
-        with self.cache_lock:
+        with self.safe_lock():
             self.cache[cache_key] = (time.time(), data)
             logger.info(f"Updated cache for key {cache_key[:8]}...")
     
@@ -97,13 +132,13 @@ class MetricsCache:
         """
         cache_key = self._generate_cache_key(**filter_params)
         
-        with self.cache_lock:
+        with self.safe_lock():
             if cache_key in self.cache:
                 del self.cache[cache_key]
                 logger.info(f"Invalidated cache for key {cache_key[:8]}...")
     
     def invalidate_all(self) -> None:
         """Invalidate all cached data."""
-        with self.cache_lock:
+        with self.safe_lock():
             self.cache.clear()
             logger.info("Invalidated all cached data") 
