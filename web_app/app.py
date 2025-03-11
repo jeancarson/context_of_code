@@ -491,7 +491,14 @@ def add_metrics():
                     MetricTypes.metric_type_name == metric['type']
                 ).first()
                 if not metric_type:
-                    continue
+                    # Create new metric type for this device
+                    metric_type = MetricTypes(
+                        device_id=device.device_id,
+                        metric_type_name=metric['type'],
+                        created_at=str(datetime.datetime.utcnow())
+                    )
+                    db.add(metric_type)
+                    db.flush()  # Get the new metric type ID
 
                 # Check for existing value
                 existing = db.query(MetricValues).filter(
