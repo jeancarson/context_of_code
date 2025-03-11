@@ -59,14 +59,15 @@ class StateAPI:
             
     def register_action_handler(self, state_value: str, handler: Callable):
         """
-        Register a handler function for a specific state value
+        Register a handler to be called when the state changes to a specific value
         
         Args:
-            state_value: The state value to trigger this handler (e.g., "B")
-            handler: The function to call when this state is detected
+            state_value: The state value to trigger the handler for.
+                         Use "*" to trigger the handler for any state change.
+            handler: The function to call when the state changes to the specified value
         """
+        logger.info(f"Registering handler for state '{state_value}'")
         self._action_handlers[state_value] = handler
-        logger.info(f"Registered handler for state '{state_value}'")
         
     def set_debounce_time(self, seconds: int):
         """
@@ -101,56 +102,47 @@ class StateAPI:
             
     async def handle_state_change(self):
         """
-        Check for state changes and execute the appropriate handler
-        
-        Returns:
-            True if a handler was executed, False otherwise
+        Check for state changes and execute the appropriate handler if a change is detected.
+        This method is more responsive to state changes and includes debounce handling.
         """
-        state = await self.check_state()
-        
-        if not state or not state.get("value") or not state.get("timestamp"):
-            return False
+        try:
+            state = await self.check_state()
+            if not state or 'value' not in state:
+                return
             
-        # Get the current state value
-        current_state_value = state["value"]
-        
-        # Check if this is a new state change
-        if (self._last_checked_timestamp is None or 
-                state["timestamp"] > self._last_checked_timestamp):
+            current_state_value = state['value']
+            current_time = time.time()
             
-            # Update the last checked timestamp
-            self._last_checked_timestamp = state["timestamp"]
-            
-            # Check if the state value has changed
-            if current_state_value != self._last_state_value:
+            # Check if the state has changed since the last check
+            if self._last_state_value is not None and current_state_value != self._last_state_value:
                 logger.info(f"State changed from {self._last_state_value} to {current_state_value}")
                 
-                # Get the handler for this state value
-                handler = self._action_handlers.get(current_state_value)
-                
-                if handler:
-                    # Check debounce
-                    current_time = time.time()
-                    if current_time - self._last_action_time >= self._debounce_seconds:
-                        # Execute the handler
-                        logger.info(f"Executing handler for state '{current_state_value}'")
-                        try:
-                            handler()
-                            self._last_action_time = current_time
-                            # Update the last state value
-                            self._last_state_value = current_state_value
-                            return True
-                        except Exception as e:
-                            logger.error(f"Error executing handler for state '{current_state_value}': {e}")
+                # Check if enough time has passed since the last action (debounce)
+                if current_time - self._last_action_time >= self._debounce_seconds:
+                    # Check for wildcard handler first
+                    if "*" in self._action_handlers:
+                        logger.info(f"Executing wildcard handler for state change to {current_state_value}")
+                        self._action_handlers["*"]()
+                        self._last_action_time = current_time
+                    # Then check for specific state handler
+                    elif current_state_value in self._action_handlers:
+                        logger.info(f"Executing handler for state {current_state_value}")
+                        self._action_handlers[current_state_value]()
+                        self._last_action_time = current_time
                     else:
-                        logger.info(f"Skipping action due to debounce ({self._debounce_seconds}s)")
+                        logger.info(f"No handler registered for state {current_state_value}")
+                else:
+                    logger.info(f"Debouncing action for state {current_state_value} " +
+                               f"({current_time - self._last_action_time:.2f}s < {self._debounce_seconds}s)")
             
-            # Always update the last state value, even if no handler was executed
+            # Update the last state value and timestamp
             self._last_state_value = current_state_value
-                    
-        return False
+            self._last_checked_timestamp = state.get('timestamp')
+            
+        except Exception as e:
+            logger.error(f"Error handling state change: {e}")
         
-    async def monitor_state(self, interval_seconds: float = 1.0):
+    async def monitor_state(self, interval_seconds: float = 0.5):
         """
         Continuously monitor the state and execute handlers when changes are detected
         
