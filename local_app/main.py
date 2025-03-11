@@ -33,8 +33,6 @@ class Application:
         self._running = True
         self._event_loop = None
         self._metrics_queue = []  # Queue to store metrics before sending
-        self._last_calculator_state = None  # Track last calculator state
-        self._last_calculator_open_time = 0  # Track when calculator was last opened
         self._state_api = None  # StateAPI instance
         self._state_monitoring_task = None  # Task for monitoring state changes
         # Use a persistent storage directory in the application directory
