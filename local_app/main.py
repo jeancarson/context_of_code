@@ -20,7 +20,7 @@ from devices.local.service import LocalMetricsService
 from services.calculator import CalculatorService
 from devices.base_device import MetricDTO
 from utils.calculator import open_calculator
-from metrics_sdk import MetricsAPI, MetricSnapshotDTO, MetricValueDTO
+from metrics_sdk import MetricsAPI, MetricSnapshotDTO, MetricValueDTO, StateAPI
 from lib_utils.logger import Logger
 from local_app.config.config import Config
 
@@ -35,6 +35,8 @@ class Application:
         self._metrics_queue = []  # Queue to store metrics before sending
         self._last_calculator_state = None  # Track last calculator state
         self._last_calculator_open_time = 0  # Track when calculator was last opened
+        self._state_api = None  # StateAPI instance
+        self._state_monitoring_task = None  # Task for monitoring state changes
         # Use a persistent storage directory in the application directory
         metrics_storage = os.path.join(os.path.dirname(__file__), 'metrics_storage')
         self._metrics_api = MetricsAPI(self.config['api']['base_url'], storage_dir=metrics_storage)
@@ -181,46 +183,12 @@ class Application:
         logger.error(f"Device {device.device_name} has no UUID")
         return None
 
-    async def check_calculator(self):
-        """Check if calculator needs to be opened"""
-        connection_error_logged = False  # Track if we've already logged a connection error
-        
-        while self._running:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(f"{self.config['api']['base_url']}/check-calculator") as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            
-                            # Check if calculator should be opened
-                            if data.get('open_calculator'):
-                                # Add debounce to prevent multiple openings
-                                current_time = time.time()
-                                if current_time - getattr(self, '_last_calculator_open_time', 0) > 5:  # 5-second debounce
-                                    open_calculator()
-                                    logger.info("Opening calculator due to server request")
-                                    self._last_calculator_open_time = current_time
-                            
-                            connection_error_logged = False  # Reset error flag on successful connection
-                        else:
-                            if not connection_error_logged:
-                                logger.info(f"Calculator check returned unexpected status {response.status}")
-                                connection_error_logged = True
-                                
-            except aiohttp.ClientError as e:
-                if not connection_error_logged:
-                    logger.info("Calculator service unavailable - web app appears to be offline")
-                    connection_error_logged = True
-            except Exception as e:
-                if not connection_error_logged:
-                    logger.warning(f"Unexpected error in calculator check: {str(e)}")
-                    connection_error_logged = True
-                    
-            await asyncio.sleep(1)  # Poll every second
-
     async def initialize(self):
         """Initialize async components"""
         await self._metrics_api.connect()  # This will also load the persisted queue
+        
+        # Setup state monitoring
+        await self.setup_state_monitoring()
 
     async def run_async(self):
         """Async main loop"""
@@ -242,8 +210,8 @@ class Application:
                     self.local_metrics_service,
                     self.config['intervals']['local']
                 ),
-                self.send_metrics_task(),
-                self.check_calculator()  # Add calculator check task
+                self.send_metrics_task()
+                # The check_calculator task is replaced by the StateAPI monitor_state task
             ]
             
             # Run all tasks concurrently
@@ -257,6 +225,11 @@ class Application:
     def _cleanup(self):
         """Cleanup resources"""
         logger.info("Shutting down application...")
+        
+        # Cancel the state monitoring task if it exists
+        if hasattr(self, '_state_monitoring_task') and self._state_monitoring_task:
+            self._state_monitoring_task.cancel()
+        
         if self._event_loop:
             self._event_loop.close()
 
@@ -283,6 +256,44 @@ class Application:
                 logger.error(f"Traceback: {''.join(traceback.format_tb(e.__traceback__))}")
         finally:
             self._cleanup()
+
+    async def setup_state_monitoring(self):
+        """Setup state monitoring with the StateAPI"""
+        try:
+            # Initialize the StateAPI
+            self._state_api = StateAPI(self.config['api']['base_url'])
+            
+            # Connect to the StateAPI
+            await self._state_api.connect()
+            
+            # Register the calculator handler for state "B"
+            self._state_api.register_action_handler("B", open_calculator)
+            
+            # Set the debounce time (optional, default is 5 seconds)
+            self._state_api.set_debounce_time(5)
+            
+            # Start monitoring in a separate task
+            # We'll use a wrapper function to ensure the StateAPI is properly closed
+            async def monitor_state_wrapper():
+                try:
+                    await self._state_api.monitor_state()
+                except asyncio.CancelledError:
+                    logger.info("State monitoring task cancelled")
+                except Exception as e:
+                    logger.error(f"Error in state monitoring: {e}")
+                finally:
+                    # Ensure the StateAPI is closed when the task ends
+                    await self._state_api.close()
+                    logger.info("StateAPI closed")
+            
+            # Create the monitoring task
+            self._state_monitoring_task = asyncio.create_task(monitor_state_wrapper())
+            logger.info("State monitoring started")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error setting up state monitoring: {e}")
+            return False
 
 def main():
     # Load configuration

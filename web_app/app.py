@@ -77,6 +77,15 @@ dash_app = Dash(
 # Initialize the metrics cache with a 30-second duration
 metrics_cache = MetricsCache(cache_duration_seconds=30)
 
+# State toggle system
+state_lock = Lock()
+current_state = {
+    "value": "A",  # Current state value (A or B)
+    "timestamp": None,     # When the state was last changed
+    "last_toggle_time": None  # Track the last time the state was toggled
+}
+
+
 # Define the Dash layout with routing
 dash_app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
@@ -117,16 +126,16 @@ def display_page(pathname):
         return html.Div([
             html.Div([
                 html.Div([
-                    html.Div(f"You have visited this page {visit_count} time{'s' if visit_count != 1 else ''}! WHhy are you so obsessed with me? 🤨"),
+                    html.Div(f"You have visited this page {visit_count} time{'s' if visit_count != 1 else ''}! Why are you so obsessed with me? 🤨"),
                     html.Div(f"Visiting from: {location}", className='location-text')
                 ], className='visit-banner'),
                 html.Div([
                     dcc.Link('View Metrics Dashboard', href='/dashboard', className='button dashboard'),
-                    html.Button('Open Calculator', id='calculator-button', className='button', n_clicks=0)
+                    html.Button('ExcecuteAggregator Actions', id='toggle-button', className='button', n_clicks=0)
                 ], className='container'),
                 
                 # Add notification div
-                html.Div(id='calculator-notification', className='notification', style={
+                html.Div(id='toggle-notification', className='notification', style={
                     'display': 'none',
                     'position': 'fixed',
                     'top': '20px',
@@ -321,9 +330,6 @@ def display_page(pathname):
     
     return '404'
 
-calculator_lock = Lock()
-calculator_state = "A"  # Toggle between "A" and "B"
-
 # Initialize database if running directly (not through WSGI)
 if __name__ == "__main__":
     init_db()
@@ -375,7 +381,7 @@ def register_aggregator():
             )
             db.add(aggregator)
             db.commit()
-            
+                            
             return jsonify({
                 "status": StatusCode.OK,
                 "uuid": aggregator.aggregator_uuid
@@ -512,25 +518,51 @@ def add_metrics():
             "message": str(e)
         }), HTTPStatusCode.INTERNAL_SERVER_ERROR
 
-@server.route("/toggle-calculator", methods=["POST"])
-def toggle_calculator():
-    """Toggle calculator request flag"""
-    global calculator_state
-    with calculator_lock:
-        calculator_state = "B" if calculator_state == "A" else "A"
-        return jsonify({
-            "calculator_state": calculator_state
-        })
+@server.route("/check-state", methods=["GET"])
+def check_state():
+    """Check the current state"""
+    with state_lock:
+        # Return the current state
+        return jsonify(current_state)
 
-@server.route("/check-calculator", methods=["GET"])
-def check_calculator():
-    """Check if calculator should be opened and reset the flag"""
-    global calculator_state
-    with calculator_lock:
-        response = {"open_calculator": calculator_state == "B"}
-        if calculator_state == "B":
-            calculator_state = "A"
-        return jsonify(response)
+@server.route("/toggle-state", methods=["POST"])
+def toggle_state():
+    """Toggle the current state with a 2-second delay between toggles"""
+    try:
+        # Get the current time
+        current_time = datetime.datetime.now()
+        
+        with state_lock:
+            # Check if we need to enforce the delay
+            if current_state["last_toggle_time"] is not None:
+                # Calculate the time since the last toggle
+                last_toggle = datetime.datetime.fromisoformat(current_state["last_toggle_time"])
+                time_since_last_toggle = (current_time - last_toggle).total_seconds()
+                
+                # If it's been less than 1 second, don't allow the toggle
+                if time_since_last_toggle < 2.0:
+                    return jsonify({
+                        "status": "ERROR",
+                        "message": f"Please wait {2.0 - time_since_last_toggle:.1f} seconds before toggling again",
+                        "state": current_state["value"]
+                    })
+            
+            # Toggle the state
+            current_state["value"] = "A" if current_state["value"] == "B" else "B"
+            current_time_iso = current_time.isoformat()
+            current_state["timestamp"] = current_time_iso
+            current_state["last_toggle_time"] = current_time_iso
+        
+        return jsonify({
+            "status": "SUCCESS",
+            "state": current_state["value"]
+        })
+    except Exception as e:
+        logger.error(f"Error toggling state: {e}")
+        return jsonify({
+            "status": "ERROR",
+            "message": str(e)
+        }), HTTPStatusCode.INTERNAL_SERVER_ERROR
 
 @server.route("/static/<path:path>")
 def send_static(path):
@@ -994,20 +1026,59 @@ def handle_refresh_click(n_clicks):
 
 # Remove the clientside_callback and add a regular Dash callback
 @dash_app.callback(
-    [Output('calculator-notification', 'children'),
-     Output('calculator-notification', 'style')],
-    Input('calculator-button', 'n_clicks'),
+    [Output('toggle-notification', 'children'),
+     Output('toggle-notification', 'style'),
+     Output('toggle-button', 'disabled')],
+    Input('toggle-button', 'n_clicks'),
     prevent_initial_call=True
 )
-def handle_calculator_button(n_clicks):
+def handle_toggle_button(n_clicks):
     if n_clicks:
-        # Make request to toggle calculator
+        # Make request to toggle state
         try:
-            requests.post(f"{request.url_root}toggle-calculator")
+            # Use the new endpoint to toggle the state
+            response = requests.post(f"{request.url_root}toggle-state")
+            response_data = response.json()
             
-            # Create notification with close button
+            # Check if there was an error
+            if response.status_code != 200 or response_data.get("status") == "ERROR":
+                # Create error notification
+                error_message = response_data.get("message", "Error toggling state")
+                notification = html.Div([
+                    html.Span(error_message, style={'margin-right': '10px'}),
+                    html.Button("×", id='close-notification', style={
+                        'background': 'none',
+                        'border': 'none',
+                        'color': 'white',
+                        'font-size': '20px',
+                        'cursor': 'pointer',
+                        'padding': '0 5px',
+                        'float': 'right'
+                    })
+                ])
+                
+                # Show error notification
+                notification_style = {
+                    'display': 'block',
+                    'position': 'fixed',
+                    'top': '20px',
+                    'right': '20px',
+                    'padding': '15px 20px',
+                    'background-color': '#f44336',  # Red for errors
+                    'color': 'white',
+                    'border-radius': '4px',
+                    'box-shadow': '0 4px 8px rgba(0,0,0,0.2)',
+                    'z-index': '1000',
+                    'opacity': '0.9',
+                    'transition': 'opacity 0.5s'
+                }
+                
+                # Don't disable the button on error
+                return notification, notification_style, False
+            
+            # Create success notification
             notification = html.Div([
-                html.Span("Calculator request sent to active aggregators!", style={'margin-right': '10px'}),
+                html.Span("Message sent", style={'margin-right': '10px'}),
                 html.Button("×", id='close-notification', style={
                     'background': 'none',
                     'border': 'none',
@@ -1035,9 +1106,10 @@ def handle_calculator_button(n_clicks):
                 'transition': 'opacity 0.5s'
             }
             
-            return notification, notification_style
+            # Disable the button (it will be re-enabled after 2 seconds)
+            return notification, notification_style, True
         except Exception as e:
-            logger.error(f"Error sending calculator request: {e}")
+            logger.error(f"Error toggling state: {e}")
             
             # Create error notification
             error_notification = html.Div([
@@ -1060,7 +1132,7 @@ def handle_calculator_button(n_clicks):
                 'top': '20px',
                 'right': '20px',
                 'padding': '15px 20px',
-                'background-color': '#f44336',  # Red for error
+                'background-color': '#f44336',
                 'color': 'white',
                 'border-radius': '4px',
                 'box-shadow': '0 4px 8px rgba(0,0,0,0.2)',
@@ -1069,19 +1141,33 @@ def handle_calculator_button(n_clicks):
                 'transition': 'opacity 0.5s'
             }
             
-            return error_notification, error_style
+            # Don't disable the button on error
+            return error_notification, error_style, False
     
-    return "", {'display': 'none'}
+    return "", {'display': 'none'}, False
 
 # Add callback to close the notification
 @dash_app.callback(
-    Output('calculator-notification', 'style', allow_duplicate=True),
+    Output('toggle-notification', 'style', allow_duplicate=True),
     Input('close-notification', 'n_clicks'),
     prevent_initial_call=True
 )
 def close_notification(n_clicks):
     if n_clicks:
         return {'display': 'none'}
+    return dash.no_update
+
+# Add callback to re-enable the button after 2 seconds
+@dash_app.callback(
+    Output('toggle-button', 'disabled', allow_duplicate=True),
+    Input('toggle-button', 'disabled'),
+    prevent_initial_call=True
+)
+def enable_button_after_delay(disabled):
+    if disabled:
+        # Use dcc.Interval to create a delay
+        time.sleep(2)
+        return False
     return dash.no_update
 
 if __name__ == '__main__':
