@@ -1,8 +1,12 @@
+"""
+This script generates the models for the database.
+Generated models are stored in the lib/models/generated_models.py file.
+
+"""
+
 from sqlacodegen.generators.declarative import generator
 from sqlalchemy import create_engine
 import os
-
-#one time set up script
 
 # Get absolute path to db.db
 current_dir = os.path.dirname(os.path.abspath(__file__))
