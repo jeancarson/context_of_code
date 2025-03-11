@@ -522,16 +522,29 @@ def add_metrics():
 
 @server.route("/check-state", methods=["GET"])
 def check_state():
-    """Check the current state"""
+    """Check the current state and reset it to A if it's B"""
     with state_lock:
         # Log the current state for debugging
-        logger.debug(f"Returning current state: {current_state}")
-        # Return the current state
-        return jsonify(current_state)
+        logger.debug(f"Checking current state: {current_state}")
+        
+        # Get the current state value
+        current_value = current_state["value"]
+        
+        # Create a copy of the current state to return
+        state_response = current_state.copy()
+        
+        # If the state is B, reset it to A after checking
+        if current_value == "B":
+            logger.info(f"Resetting state from B to A after check")
+            current_state["value"] = "A"
+            current_state["timestamp"] = datetime.datetime.now().isoformat()
+        
+        # Return the original state (before reset)
+        return jsonify(state_response)
 
 @server.route("/toggle-state", methods=["POST"])
 def toggle_state():
-    """Toggle the current state with a 2-second delay between toggles"""
+    """Toggle the current state to trigger calculator opening"""
     try:
         # Get the current time
         current_time = datetime.datetime.now()
@@ -543,7 +556,7 @@ def toggle_state():
                 last_toggle = datetime.datetime.fromisoformat(current_state["last_toggle_time"])
                 time_since_last_toggle = (current_time - last_toggle).total_seconds()
                 
-                # If it's been less than 1 second, don't allow the toggle
+                # If it's been less than 2 seconds, don't allow the toggle
                 if time_since_last_toggle < 2.0:
                     return jsonify({
                         "status": "ERROR",
@@ -551,22 +564,35 @@ def toggle_state():
                         "state": current_state["value"]
                     })
             
-            # Toggle the state
-            current_state["value"] = "A" if current_state["value"] == "B" else "B"
+            # Get the old state for logging
+            old_state = current_state["value"]
+            
+            # Always set to state B to trigger calculator opening
+            # The check_state endpoint will reset it to A after it's been checked
+            new_state = "B"
+            current_state["value"] = new_state
+            
+            # Update timestamps
             current_time_iso = current_time.isoformat()
             current_state["timestamp"] = current_time_iso
             current_state["last_toggle_time"] = current_time_iso
+            
+            # Log the state change
+            logger.info(f"State manually set to B to trigger calculator opening at {current_time_iso}")
         
         return jsonify({
             "status": "SUCCESS",
-            "state": current_state["value"]
+            "previous_state": old_state,
+            "new_state": new_state,
+            "message": "Calculator opening request sent",
+            "timestamp": current_time_iso
         })
     except Exception as e:
         logger.error(f"Error toggling state: {e}")
         return jsonify({
             "status": "ERROR",
             "message": str(e)
-        }), HTTPStatusCode.INTERNAL_SERVER_ERROR
+        }), 500
 
 @server.route("/static/<path:path>")
 def send_static(path):
@@ -1038,117 +1064,48 @@ def handle_refresh_click(n_clicks):
 )
 def handle_toggle_button(n_clicks):
     if n_clicks:
-        # Make request to toggle state
         try:
-            # Use the new endpoint to toggle the state
-            response = requests.post(f"{request.url_root}toggle-state")
-            response_data = response.json()
+            # Toggle the state to trigger calculator opening
+            toggle_response = requests.post(f"{config.api.base_url}/toggle-state")
             
-            # Check if there was an error
-            if response.status_code != 200 or response_data.get("status") == "ERROR":
-                # Create error notification
-                error_message = response_data.get("message", "Error toggling state")
+            if toggle_response.status_code == 200:
+                response_data = toggle_response.json()
+                
+                if response_data.get("status") == "SUCCESS":
+                    # Create a notification about the calculator opening
+                    notification = html.Div([
+                        html.P("Calculator opening request sent!", className="mb-2"),
+                        html.P("The calculator application should open shortly on connected devices.", className="mb-2"),
+                        html.Button("Close", id="close-notification", className="btn btn-sm btn-secondary")
+                    ])
+                    
+                    # Return the notification, make it visible, and disable the button
+                    return notification, {'display': 'block'}, True
+                else:
+                    # Handle error in toggle request
+                    error_message = response_data.get('message', 'Unknown error')
+                    notification = html.Div([
+                        html.P(f"Error sending calculator request: {error_message}", className="mb-2 text-danger"),
+                        html.Button("Close", id="close-notification", className="btn btn-sm btn-secondary")
+                    ])
+                    return notification, {'display': 'block'}, False
+            else:
+                # Handle HTTP error
                 notification = html.Div([
-                    html.Span(error_message, style={'margin-right': '10px'}),
-                    html.Button("×", id='close-notification', style={
-                        'background': 'none',
-                        'border': 'none',
-                        'color': 'white',
-                        'font-size': '20px',
-                        'cursor': 'pointer',
-                        'padding': '0 5px',
-                        'float': 'right'
-                    })
+                    html.P(f"Error: HTTP {toggle_response.status_code}", className="mb-2 text-danger"),
+                    html.Button("Close", id="close-notification", className="btn btn-sm btn-secondary")
                 ])
-                
-                # Show error notification
-                notification_style = {
-                    'display': 'block',
-                    'position': 'fixed',
-                    'top': '20px',
-                    'right': '20px',
-                    'padding': '15px 20px',
-                    'background-color': '#f44336',  # Red for errors
-                    'color': 'white',
-                    'border-radius': '4px',
-                    'box-shadow': '0 4px 8px rgba(0,0,0,0.2)',
-                    'z-index': '1000',
-                    'opacity': '0.9',
-                    'transition': 'opacity 0.5s'
-                }
-                
-                # Don't disable the button on error
-                return notification, notification_style, False
-            
-            # Create success notification
-            notification = html.Div([
-                html.Span("Message sent", style={'margin-right': '10px'}),
-                html.Button("×", id='close-notification', style={
-                    'background': 'none',
-                    'border': 'none',
-                    'color': 'white',
-                    'font-size': '20px',
-                    'cursor': 'pointer',
-                    'padding': '0 5px',
-                    'float': 'right'
-                })
-            ])
-            
-            # Show notification
-            notification_style = {
-                'display': 'block',
-                'position': 'fixed',
-                'top': '20px',
-                'right': '20px',
-                'padding': '15px 20px',
-                'background-color': '#4CAF50',
-                'color': 'white',
-                'border-radius': '4px',
-                'box-shadow': '0 4px 8px rgba(0,0,0,0.2)',
-                'z-index': '1000',
-                'opacity': '0.9',
-                'transition': 'opacity 0.5s'
-            }
-            
-            # Disable the button (it will be re-enabled after 2 seconds)
-            return notification, notification_style, True
+                return notification, {'display': 'block'}, False
         except Exception as e:
-            logger.error(f"Error toggling state: {e}")
-            
-            # Create error notification
-            error_notification = html.Div([
-                html.Span(f"Error: {str(e)}", style={'margin-right': '10px'}),
-                html.Button("×", id='close-notification', style={
-                    'background': 'none',
-                    'border': 'none',
-                    'color': 'white',
-                    'font-size': '20px',
-                    'cursor': 'pointer',
-                    'padding': '0 5px',
-                    'float': 'right'
-                })
+            # Handle any other exceptions
+            notification = html.Div([
+                html.P(f"Error: {str(e)}", className="mb-2 text-danger"),
+                html.Button("Close", id="close-notification", className="btn btn-sm btn-secondary")
             ])
-            
-            # Show error notification
-            error_style = {
-                'display': 'block',
-                'position': 'fixed',
-                'top': '20px',
-                'right': '20px',
-                'padding': '15px 20px',
-                'background-color': '#f44336',
-                'color': 'white',
-                'border-radius': '4px',
-                'box-shadow': '0 4px 8px rgba(0,0,0,0.2)',
-                'z-index': '1000',
-                'opacity': '0.9',
-                'transition': 'opacity 0.5s'
-            }
-            
-            # Don't disable the button on error
-            return error_notification, error_style, False
+            return notification, {'display': 'block'}, False
     
-    return "", {'display': 'none'}, False
+    # Default return if n_clicks is None
+    return dash.no_update, dash.no_update, dash.no_update
 
 # Add callback to close the notification
 @dash_app.callback(

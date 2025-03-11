@@ -123,8 +123,9 @@ class StateAPI:
                 self._last_checked_timestamp = state.get('timestamp')
                 return
             
-            # Only trigger handlers if the state value has actually changed
-            if current_state_value != self._last_state_value:
+            # Only trigger handlers if the state value has changed to B
+            # We don't trigger when it changes back to A since that's automatic
+            if current_state_value != self._last_state_value and current_state_value == "B":
                 logger.info(f"State changed from {self._last_state_value} to {current_state_value}")
                 
                 # Check if enough time has passed since the last action (debounce)
@@ -150,10 +151,13 @@ class StateAPI:
                 else:
                     logger.info(f"Debouncing action for state {current_state_value} " +
                                f"({current_time - self._last_action_time:.2f}s < {self._debounce_seconds}s)")
-                
-                # Update the last state value after handling the change
-                self._last_state_value = current_state_value
-                self._last_checked_timestamp = state.get('timestamp')
+            elif current_state_value != self._last_state_value:
+                # Log state changes that don't trigger actions (e.g., B to A)
+                logger.info(f"State changed from {self._last_state_value} to {current_state_value} (no action needed)")
+            
+            # Always update the last state value
+            self._last_state_value = current_state_value
+            self._last_checked_timestamp = state.get('timestamp')
             
         except Exception as e:
             logger.error(f"Error handling state change: {e}")
