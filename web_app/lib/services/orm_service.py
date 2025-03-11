@@ -2,9 +2,10 @@ from sqlalchemy import select, func, and_, desc
 from sqlalchemy.orm import Session
 from ..models.generated_models import Devices, MetricTypes, MetricSnapshots, MetricValues, Visits, Aggregators
 from typing import List, Dict, Any
-from datetime import datetime
 import logging
 from datetime import datetime, timezone, timedelta
+import pandas as pd
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,361 @@ def add_metric_values(db: Session, snapshot_id: int, metrics: List[Dict]) -> Non
         db.rollback()
         raise e
 
-def get_db():
-    # Assuming this function is defined elsewhere in your codebase
-    pass
+def get_or_create_visit(db: Session, ip_address: str) -> tuple:
+    """Get or create a visit record for an IP address
+    
+    Args:
+        db (Session): Database session
+        ip_address (str): IP address of the visitor
+        
+    Returns:
+        tuple: (visit_record, visit_count, is_new)
+    """
+    visit = db.query(Visits).filter(Visits.ip_address == ip_address).first()
+    is_new = False
+    
+    if visit:
+        visit.count += 1
+        visit.last_visit = datetime.now()
+        visit_count = visit.count
+    else:
+        is_new = True
+        visit = Visits(
+            ip_address=ip_address,
+            count=1,
+            last_visit=datetime.now()
+        )
+        db.add(visit)
+        visit_count = 1
+    
+    db.commit()
+    return visit, visit_count, is_new
+
+def get_aggregator_by_uuid(db: Session, aggregator_uuid: str) -> Aggregators:
+    """Get an aggregator by UUID
+    
+    Args:
+        db (Session): Database session
+        aggregator_uuid (str): UUID of the aggregator
+        
+    Returns:
+        Aggregators: Aggregator record or None if not found
+    """
+    return db.query(Aggregators).filter(
+        Aggregators.aggregator_uuid == aggregator_uuid
+    ).first()
+
+def create_aggregator(db: Session, aggregator_uuid: str, name: str) -> Aggregators:
+    """Create a new aggregator
+    
+    Args:
+        db (Session): Database session
+        aggregator_uuid (str): UUID of the aggregator
+        name (str): Name of the aggregator
+        
+    Returns:
+        Aggregators: Created aggregator record
+    """
+    aggregator = Aggregators(
+        aggregator_uuid=aggregator_uuid,
+        name=name,
+        created_at=str(datetime.utcnow())
+    )
+    db.add(aggregator)
+    db.commit()
+    return aggregator
+
+def get_device_by_uuid(db: Session, device_uuid: str) -> Devices:
+    """Get a device by UUID
+    
+    Args:
+        db (Session): Database session
+        device_uuid (str): UUID of the device
+        
+    Returns:
+        Devices: Device record or None if not found
+    """
+    return db.query(Devices).filter(
+        Devices.device_uuid == device_uuid
+    ).first()
+
+def create_device(db: Session, device_uuid: str, device_name: str, aggregator_id: int) -> Devices:
+    """Create a new device
+    
+    Args:
+        db (Session): Database session
+        device_uuid (str): UUID of the device
+        device_name (str): Name of the device
+        aggregator_id (int): ID of the aggregator
+        
+    Returns:
+        Devices: Created device record
+    """
+    device = Devices(
+        device_uuid=device_uuid,
+        device_name=device_name,
+        aggregator_id=aggregator_id,
+        created_at=str(datetime.utcnow())
+    )
+    db.add(device)
+    db.commit()
+    return device
+
+def create_metric_snapshot(db: Session, device_id: int, client_timestamp: str, 
+                          client_timezone: int, server_timezone: int) -> MetricSnapshots:
+    """Create a new metric snapshot
+    
+    Args:
+        db (Session): Database session
+        device_id (int): ID of the device
+        client_timestamp (str): Client timestamp
+        client_timezone (int): Client timezone offset in minutes
+        server_timezone (int): Server timezone offset in minutes
+        
+    Returns:
+        MetricSnapshots: Created snapshot record
+    """
+    snapshot = MetricSnapshots(
+        device_id=device_id,
+        client_timestamp_utc=client_timestamp,
+        client_timezone_minutes=client_timezone,
+        server_timestamp_utc=datetime.utcnow(),
+        server_timezone_minutes=server_timezone
+    )
+    db.add(snapshot)
+    db.flush()  # Get the snapshot ID without committing
+    return snapshot
+
+def get_or_create_metric_type(db: Session, device_id: int, metric_type_name: str) -> MetricTypes:
+    """Get or create a metric type
+    
+    Args:
+        db (Session): Database session
+        device_id (int): ID of the device
+        metric_type_name (str): Name of the metric type
+        
+    Returns:
+        MetricTypes: Metric type record
+    """
+    metric_type = db.query(MetricTypes).filter(
+        MetricTypes.metric_type_name == metric_type_name
+    ).first()
+    
+    if not metric_type:
+        metric_type = MetricTypes(
+            device_id=device_id,
+            metric_type_name=metric_type_name,
+            created_at=str(datetime.utcnow())
+        )
+        db.add(metric_type)
+        db.flush()  # Get the new metric type ID without committing
+    
+    return metric_type
+
+def add_or_update_metric_value(db: Session, snapshot_id: int, metric_type_id: int, value: float) -> MetricValues:
+    """Add or update a metric value
+    
+    Args:
+        db (Session): Database session
+        snapshot_id (int): ID of the snapshot
+        metric_type_id (int): ID of the metric type
+        value (float): Metric value
+        
+    Returns:
+        MetricValues: Metric value record
+    """
+    existing = db.query(MetricValues).filter(
+        MetricValues.metric_snapshot_id == snapshot_id,
+        MetricValues.metric_type_id == metric_type_id
+    ).first()
+    
+    if existing:
+        existing.value = value
+        return existing
+    else:
+        value_record = MetricValues(
+            metric_snapshot_id=snapshot_id,
+            metric_type_id=metric_type_id,
+            value=value
+        )
+        db.add(value_record)
+        return value_record
+
+def add_metrics_batch(db: Session, device_uuid: str, client_timestamp: str, 
+                     client_timezone: int, metrics: List[Dict]) -> None:
+    """Add a batch of metrics for a device
+    
+    Args:
+        db (Session): Database session
+        device_uuid (str): UUID of the device
+        client_timestamp (str): Client timestamp
+        client_timezone (int): Client timezone offset in minutes
+        metrics (List[Dict]): List of metrics to add
+    """
+    try:
+        # Get device
+        device = get_device_by_uuid(db, device_uuid)
+        if not device:
+            raise ValueError(f"Device not found: {device_uuid}")
+
+        # Create snapshot
+        server_timezone = -datetime.now().astimezone().utcoffset().total_seconds() // 60
+        snapshot = create_metric_snapshot(db, device.device_id, client_timestamp, 
+                                         client_timezone, server_timezone)
+
+        # Add metric values
+        for metric in metrics:
+            metric_type = get_or_create_metric_type(db, device.device_id, metric['type'])
+            add_or_update_metric_value(db, snapshot.metric_snapshot_id, metric_type.metric_type_id, metric['value'])
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise e
+
+def get_dropdown_options(db: Session) -> tuple:
+    """Get options for all dropdowns
+    
+    Args:
+        db (Session): Database session
+        
+    Returns:
+        tuple: (metric_options, aggregator_options, device_options)
+    """
+    # Get metric types
+    metric_types = db.query(MetricTypes).all()
+    metric_options = [{'label': mt.metric_type_name, 'value': mt.metric_type_id} for mt in metric_types]
+    
+    # Get aggregators
+    aggregators = db.query(Aggregators).all()
+    aggregator_options = [{'label': agg.name, 'value': agg.aggregator_id} for agg in aggregators]
+    
+    # Get devices
+    devices = db.query(Devices).all()
+    device_options = [{'label': dev.device_name, 'value': dev.device_id} for dev in devices]
+    
+    return metric_options, aggregator_options, device_options
+
+def get_filtered_metrics(db: Session, metric_type_id=None, start_date=None, end_date=None, 
+                        min_value=None, max_value=None, aggregator_id=None, device_id=None, 
+                        sort_order='desc', page_number=0, rows_per_page=20) -> tuple:
+    """Get filtered metrics with pagination
+    
+    Args:
+        db (Session): Database session
+        metric_type_id: Optional filter by metric type ID
+        start_date: Optional filter by start date
+        end_date: Optional filter by end date
+        min_value: Optional filter by minimum value
+        max_value: Optional filter by maximum value
+        aggregator_id: Optional filter by aggregator ID
+        device_id: Optional filter by device ID
+        sort_order: Sort order ('asc' or 'desc')
+        page_number: Page number (0-indexed)
+        rows_per_page: Number of rows per page
+        
+    Returns:
+        tuple: (results, total_rows, total_pages)
+    """
+    # Build the base query with all joins
+    base_query = (db.query(
+        MetricValues.value,
+        MetricSnapshots.client_timestamp_utc,
+        Devices.device_name,
+        Aggregators.name.label('aggregator_name'),
+        MetricTypes.metric_type_name,
+        MetricTypes.metric_type_id
+    )
+    .select_from(MetricValues)
+    .join(
+        MetricSnapshots,
+        MetricValues.metric_snapshot_id == MetricSnapshots.metric_snapshot_id
+    )
+    .join(
+        Devices,
+        MetricSnapshots.device_id == Devices.device_id
+    )
+    .join(
+        Aggregators,
+        Devices.aggregator_id == Aggregators.aggregator_id
+    )
+    .join(
+        MetricTypes,
+        MetricValues.metric_type_id == MetricTypes.metric_type_id
+    ))
+    
+    # Apply filters
+    if metric_type_id:
+        base_query = base_query.filter(MetricTypes.metric_type_id.in_(metric_type_id))
+    if start_date:
+        # Convert pandas Timestamp to Python datetime object if needed
+        if isinstance(start_date, pd.Timestamp) or isinstance(start_date, str):
+            start_date = pd.to_datetime(start_date).to_pydatetime()
+        base_query = base_query.filter(MetricSnapshots.client_timestamp_utc >= start_date)
+    if end_date:
+        # Convert pandas Timestamp to Python datetime object if needed
+        if isinstance(end_date, pd.Timestamp) or isinstance(end_date, str):
+            end_date = pd.to_datetime(end_date).to_pydatetime()
+        base_query = base_query.filter(MetricSnapshots.client_timestamp_utc <= end_date)
+    if min_value is not None:
+        base_query = base_query.filter(MetricValues.value >= min_value)
+    if max_value is not None:
+        base_query = base_query.filter(MetricValues.value <= max_value)
+    if aggregator_id:
+        base_query = base_query.filter(Aggregators.aggregator_id.in_(aggregator_id))
+    if device_id:
+        base_query = base_query.filter(Devices.device_id.in_(device_id))
+        
+    # Apply sorting
+    if sort_order == 'desc':
+        base_query = base_query.order_by(desc(MetricSnapshots.client_timestamp_utc))
+    else:
+        base_query = base_query.order_by(MetricSnapshots.client_timestamp_utc)
+        
+    # Get total count for pagination
+    count_query = base_query.with_entities(func.count())
+    total_rows = count_query.scalar()
+    
+    # Calculate total pages
+    total_pages = max(1, math.ceil(total_rows / rows_per_page))
+    
+    # Ensure page_number is valid
+    page_number = max(0, min(page_number, total_pages - 1))
+    
+    # Apply pagination
+    offset = page_number * rows_per_page
+    base_query = base_query.offset(offset).limit(rows_per_page)
+    
+    # Execute query
+    results = base_query.all()
+    
+    return results, total_rows, total_pages
+
+def get_visualization_data(db: Session, metric_type_id: int, limit: int = 1000) -> list:
+    """Get data for visualization for a specific metric type
+    
+    Args:
+        db (Session): Database session
+        metric_type_id: Metric type ID
+        limit: Maximum number of records to return
+        
+    Returns:
+        list: Query results
+    """
+    # Get additional data for visualizations
+    vis_query = (db.query(
+        MetricValues.value,
+        MetricSnapshots.client_timestamp_utc
+    )
+    .select_from(MetricValues)
+    .join(
+        MetricSnapshots,
+        MetricValues.metric_snapshot_id == MetricSnapshots.metric_snapshot_id
+    )
+    .filter(MetricValues.metric_type_id == metric_type_id)
+    .order_by(desc(MetricSnapshots.client_timestamp_utc))
+    .limit(limit))
+    
+    return vis_query.all()
+
+

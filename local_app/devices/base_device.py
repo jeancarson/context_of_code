@@ -27,6 +27,8 @@ class BaseDevice:
         self.poll_interval = poll_interval
         self.uuid: Optional[uuid.UUID] = None
         self.aggregator_uuid: Optional[uuid.UUID] = None
+        # Create a logger with the device name for better log identification
+        self.logger = logging.getLogger(f"{__name__}.{device_name}")
         self._load_or_request_uuid()
 
     def _load_or_request_uuid(self):

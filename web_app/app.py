@@ -32,7 +32,16 @@ from web_app.lib.services.orm_service import (
     get_all_metric_types,
     get_recent_metrics,
     get_all_visits,
-    get_latest_metrics_by_type
+    get_latest_metrics_by_type,
+    get_or_create_visit,
+    get_aggregator_by_uuid,
+    create_aggregator,
+    get_device_by_uuid,
+    create_device,
+    add_metrics_batch,
+    get_dropdown_options,
+    get_filtered_metrics,
+    get_visualization_data
 )
 from threading import Lock
 import time
@@ -113,20 +122,8 @@ def display_page(pathname):
         
         try:
             with get_db() as db:
-                # Update visit count
-                visit = db.query(Visits).filter(Visits.ip_address == client_ip).first()
-                if visit:
-                    visit.count += 1
-                    visit.last_visit = datetime.datetime.now()
-                    visit_count = visit.count
-                else:
-                    visit = Visits(
-                        ip_address=client_ip,
-                        count=1,
-                        last_visit=datetime.datetime.now()
-                    )
-                    db.add(visit)
-                db.commit()
+                # Update visit count using the orm_service function
+                _, visit_count, _ = get_or_create_visit(db, client_ip)
         except Exception as e:
             logger.error(f"Error updating visit count: {e}")
         
@@ -368,10 +365,8 @@ def register_aggregator():
             if not aggregator_dto.aggregator_uuid:
                 aggregator_dto.aggregator_uuid = str(uuid.uuid4())
             
-            # Check if aggregator already exists
-            existing = db.query(Aggregators).filter(
-                Aggregators.aggregator_uuid == aggregator_dto.aggregator_uuid
-            ).first()
+            # Check if aggregator already exists using orm_service
+            existing = get_aggregator_by_uuid(db, aggregator_dto.aggregator_uuid)
             
             if existing:
                 return jsonify({
@@ -380,14 +375,8 @@ def register_aggregator():
                     "uuid": existing.aggregator_uuid
                 }), HTTPStatusCode.BAD_REQUEST
             
-            # Create new aggregator
-            aggregator = Aggregators(
-                aggregator_uuid=aggregator_dto.aggregator_uuid,
-                name=aggregator_dto.name,
-                created_at=str(datetime.datetime.utcnow())
-            )
-            db.add(aggregator)
-            db.commit()
+            # Create new aggregator using orm_service
+            aggregator = create_aggregator(db, aggregator_dto.aggregator_uuid, aggregator_dto.name)
                             
             return jsonify({
                 "status": StatusCode.OK,
@@ -409,10 +398,8 @@ def register_device():
         device_dto = DeviceDTO(**data)
         
         with get_db() as db:
-            # Get aggregator
-            aggregator = db.query(Aggregators).filter(
-                Aggregators.aggregator_uuid == device_dto.aggregator_uuid
-            ).first()
+            # Get aggregator using orm_service
+            aggregator = get_aggregator_by_uuid(db, device_dto.aggregator_uuid)
             
             if not aggregator:
                 return jsonify({
@@ -424,10 +411,8 @@ def register_device():
             if not device_dto.device_uuid:
                 device_dto.device_uuid = str(uuid.uuid4())
             
-            # Check if device already exists
-            existing = db.query(Devices).filter(
-                Devices.device_uuid == device_dto.device_uuid
-            ).first()
+            # Check if device already exists using orm_service
+            existing = get_device_by_uuid(db, device_dto.device_uuid)
             
             if existing:
                 return jsonify({
@@ -436,14 +421,8 @@ def register_device():
                     "uuid": existing.device_uuid
                 }), HTTPStatusCode.BAD_REQUEST
             
-            # Create new device
-            device = Devices(
-                device_uuid=device_dto.device_uuid,
-                device_name=device_dto.device_name,
-                aggregator_id=aggregator.aggregator_id,
-                created_at=str(datetime.datetime.utcnow())
-            )
-            db.add(device)
+            # Create new device using orm_service
+            device = create_device(db, device_dto.device_uuid, device_dto.device_name, aggregator.aggregator_id)
             db.commit()
             
             return jsonify({
@@ -469,56 +448,8 @@ def add_metrics():
         metrics = data.get('metrics', [])
 
         with get_db() as db:
-            # Get device
-            device = db.query(Devices).filter(Devices.device_uuid == device_uuid).first()
-            if not device:
-                raise ValueError(f"Device not found: {device_uuid}")
-
-            # Create snapshot
-            snapshot = MetricSnapshots(
-                device_id=device.device_id,
-                client_timestamp_utc=client_timestamp,
-                client_timezone_minutes=client_timezone,
-                server_timestamp_utc=datetime.datetime.utcnow(),
-                server_timezone_minutes=-time.timezone // 60  # Local server timezone
-            )
-            db.add(snapshot)
-            db.flush()  # Get the snapshot ID
-
-            # Add metric values, handling duplicates
-            for metric in metrics:
-                metric_type = db.query(MetricTypes).filter(
-                    MetricTypes.metric_type_name == metric['type']
-                ).first()
-                if not metric_type:
-                    # Create new metric type for this device
-                    metric_type = MetricTypes(
-                        device_id=device.device_id,
-                        metric_type_name=metric['type'],
-                        created_at=str(datetime.datetime.utcnow())
-                    )
-                    db.add(metric_type)
-                    db.flush()  # Get the new metric type ID
-
-                # Check for existing value
-                existing = db.query(MetricValues).filter(
-                    MetricValues.metric_snapshot_id == snapshot.metric_snapshot_id,
-                    MetricValues.metric_type_id == metric_type.metric_type_id
-                ).first()
-
-                if existing:
-                    # Update existing value
-                    existing.value = metric['value']
-                else:
-                    # Create new value
-                    value = MetricValues(
-                        metric_snapshot_id=snapshot.metric_snapshot_id,
-                        metric_type_id=metric_type.metric_type_id,
-                        value=metric['value']
-                    )
-                    db.add(value)
-
-            db.commit()
+            # Use the orm_service function to add metrics in a batch
+            add_metrics_batch(db, device_uuid, client_timestamp, client_timezone, metrics)
 
         return jsonify({
             "status": "SUCCESS",
@@ -626,19 +557,11 @@ def populate_dropdowns(_, n_clicks):
     logger.info("Populating dropdowns...")
     try:
         with get_db() as db:
-            # Get metric types
-            metric_types = db.query(MetricTypes).all()
-            metric_options = [{'label': mt.metric_type_name, 'value': mt.metric_type_id} for mt in metric_types]
+            # Use the orm_service function to get all dropdown options
+            metric_options, aggregator_options, device_options = get_dropdown_options(db)
+            
             logger.info(f"Found {len(metric_options)} metric types")
-            
-            # Get aggregators
-            aggregators = db.query(Aggregators).all()
-            aggregator_options = [{'label': agg.name, 'value': agg.aggregator_id} for agg in aggregators]
             logger.info(f"Found {len(aggregator_options)} aggregators")
-            
-            # Get devices
-            devices = db.query(Devices).all()
-            device_options = [{'label': dev.device_name, 'value': dev.device_id} for dev in devices]
             logger.info(f"Found {len(device_options)} devices")
             
             return metric_options, aggregator_options, device_options
@@ -725,78 +648,21 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
             logger.info(f"Filters: metric_type={metric_type_id}, aggregator={aggregator_id}, device={device_id}")
             
             with get_db() as db:
-                # Build the base query with all joins
-                base_query = (db.query(
-                    MetricValues.value,
-                    MetricSnapshots.client_timestamp_utc,
-                    Devices.device_name,
-                    Aggregators.name.label('aggregator_name'),
-                    MetricTypes.metric_type_name,
-                    MetricTypes.metric_type_id
+                # Use the orm_service function to get filtered metrics
+                results, total_rows, total_pages = get_filtered_metrics(
+                    db, 
+                    metric_type_id=metric_type_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    min_value=min_value,
+                    max_value=max_value,
+                    aggregator_id=aggregator_id,
+                    device_id=device_id,
+                    sort_order=sort_order,
+                    page_number=page_number,
+                    rows_per_page=rows_per_page
                 )
-                .select_from(MetricValues)
-                .join(
-                    MetricSnapshots,
-                    MetricValues.metric_snapshot_id == MetricSnapshots.metric_snapshot_id
-                )
-                .join(
-                    Devices,
-                    MetricSnapshots.device_id == Devices.device_id
-                )
-                .join(
-                    Aggregators,
-                    Devices.aggregator_id == Aggregators.aggregator_id
-                )
-                .join(
-                    MetricTypes,
-                    MetricValues.metric_type_id == MetricTypes.metric_type_id
-                ))
                 
-                # Apply filters
-                if metric_type_id:
-                    base_query = base_query.filter(MetricTypes.metric_type_id.in_(metric_type_id))
-                if start_date:
-                    start_date = pd.to_datetime(start_date)
-                    # Convert pandas Timestamp to Python datetime object
-                    start_date = start_date.to_pydatetime()
-                    base_query = base_query.filter(MetricSnapshots.client_timestamp_utc >= start_date)
-                if end_date:
-                    end_date = pd.to_datetime(end_date)
-                    # Convert pandas Timestamp to Python datetime object
-                    end_date = end_date.to_pydatetime()
-                    base_query = base_query.filter(MetricSnapshots.client_timestamp_utc <= end_date)
-                if min_value is not None:
-                    base_query = base_query.filter(MetricValues.value >= min_value)
-                if max_value is not None:
-                    base_query = base_query.filter(MetricValues.value <= max_value)
-                if aggregator_id:
-                    base_query = base_query.filter(Aggregators.aggregator_id.in_(aggregator_id))
-                if device_id:
-                    base_query = base_query.filter(Devices.device_id.in_(device_id))
-                    
-                # Apply sorting
-                if sort_order == 'desc':
-                    base_query = base_query.order_by(desc(MetricSnapshots.client_timestamp_utc))
-                else:
-                    base_query = base_query.order_by(asc(MetricSnapshots.client_timestamp_utc))
-                    
-                # Get total count for pagination
-                count_query = base_query.with_entities(func.count())
-                total_rows = count_query.scalar()
-                logger.info(f"Total filtered records: {total_rows}")
-                
-                # Calculate total pages
-                total_pages = max(1, math.ceil(total_rows / rows_per_page))
-                
-                # Ensure page_number is valid
-                page_number = max(0, min(page_number, total_pages - 1))
-                
-                # Apply pagination
-                offset = page_number * rows_per_page
-                base_query = base_query.offset(offset).limit(rows_per_page)
-                
-                # Execute query
-                results = base_query.all()
                 logger.info(f"Fetched {len(results)} records for current page")
                 
                 # Convert to list of dicts
@@ -867,29 +733,10 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                 # Only create visualizations if exactly one metric type is selected and we have data
                 if metric_type_id and len(metric_type_id) == 1 and not df.empty:
                     single_metric_id = metric_type_id[0]  # Get the single selected metric ID
-                    # DUAL-QUERY APPROACH:
-                    # 1. For the table, we only fetch the current page of data (e.g., 20 records)
-                    # 2. For visualizations, we need more historical context, so we fetch more records
-                    # This balances:
-                    #   - Efficiency: We don't load everything for the table
-                    #   - Context: Charts have enough data to be meaningful
-                    #   - Performance: We limit the visualization data to 1000 records
                     
-                    # Get additional data for visualizations (limited to 1000 records)
-                    vis_query = (db.query(
-                        MetricValues.value,
-                        MetricSnapshots.client_timestamp_utc
-                    )
-                    .select_from(MetricValues)
-                    .join(
-                        MetricSnapshots,
-                        MetricValues.metric_snapshot_id == MetricSnapshots.metric_snapshot_id
-                    )
-                    .filter(MetricValues.metric_type_id == single_metric_id)
-                    .order_by(desc(MetricSnapshots.client_timestamp_utc))
-                    .limit(1000))
+                    # Use the orm_service function to get visualization data
+                    vis_results = get_visualization_data(db, single_metric_id)
                     
-                    vis_results = vis_query.all()
                     vis_data = [{
                         'value': float(r.value) if isinstance(r.value, Decimal) else r.value,
                         'timestamp': r.client_timestamp_utc.isoformat() if hasattr(r.client_timestamp_utc, 'isoformat') else r.client_timestamp_utc
