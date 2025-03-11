@@ -81,10 +81,10 @@ class StateAPI:
         
     async def check_state(self) -> Optional[Dict[str, Any]]:
         """
-        Check the current state from the server
+        Check the current state
         
         Returns:
-            The state object or None if there was an error
+            The current state as a dictionary, or None if there was an error
         """
         self._ensure_session()
         
@@ -92,6 +92,7 @@ class StateAPI:
             async with self._session.get(f"{self.base_url}/check-state") as response:
                 if response.status == 200:
                     state = await response.json()
+                    logger.debug(f"Retrieved state: {state}")
                     return state
                 else:
                     logger.error(f"Error checking state: {response.status}")
@@ -103,7 +104,6 @@ class StateAPI:
     async def handle_state_change(self):
         """
         Check for state changes and execute the appropriate handler if a change is detected.
-        This method is more responsive to state changes and includes debounce handling.
         """
         try:
             state = await self.check_state()
@@ -113,8 +113,18 @@ class StateAPI:
             current_state_value = state['value']
             current_time = time.time()
             
-            # Check if the state has changed since the last check
-            if self._last_state_value is not None and current_state_value != self._last_state_value:
+            # Log the current and last state values for debugging
+            logger.debug(f"Current state: {current_state_value}, Last state: {self._last_state_value}")
+            
+            # Initialize last state value if this is the first check
+            if self._last_state_value is None:
+                logger.info(f"Initializing state tracking with state: {current_state_value}")
+                self._last_state_value = current_state_value
+                self._last_checked_timestamp = state.get('timestamp')
+                return
+            
+            # Only trigger handlers if the state value has actually changed
+            if current_state_value != self._last_state_value:
                 logger.info(f"State changed from {self._last_state_value} to {current_state_value}")
                 
                 # Check if enough time has passed since the last action (debounce)
@@ -122,45 +132,54 @@ class StateAPI:
                     # Check for wildcard handler first
                     if "*" in self._action_handlers:
                         logger.info(f"Executing wildcard handler for state change to {current_state_value}")
-                        self._action_handlers["*"]()
-                        self._last_action_time = current_time
+                        try:
+                            self._action_handlers["*"]()
+                            self._last_action_time = current_time
+                        except Exception as e:
+                            logger.error(f"Error executing wildcard handler: {e}")
                     # Then check for specific state handler
                     elif current_state_value in self._action_handlers:
                         logger.info(f"Executing handler for state {current_state_value}")
-                        self._action_handlers[current_state_value]()
-                        self._last_action_time = current_time
+                        try:
+                            self._action_handlers[current_state_value]()
+                            self._last_action_time = current_time
+                        except Exception as e:
+                            logger.error(f"Error executing handler for state {current_state_value}: {e}")
                     else:
                         logger.info(f"No handler registered for state {current_state_value}")
                 else:
                     logger.info(f"Debouncing action for state {current_state_value} " +
                                f"({current_time - self._last_action_time:.2f}s < {self._debounce_seconds}s)")
-            
-            # Update the last state value and timestamp
-            self._last_state_value = current_state_value
-            self._last_checked_timestamp = state.get('timestamp')
+                
+                # Update the last state value after handling the change
+                self._last_state_value = current_state_value
+                self._last_checked_timestamp = state.get('timestamp')
             
         except Exception as e:
             logger.error(f"Error handling state change: {e}")
         
-    async def monitor_state(self, interval_seconds: float = 0.5):
+    async def monitor_state(self, interval_seconds: float = 2.0):
         """
         Continuously monitor the state and execute handlers when changes are detected
         
         Args:
-            interval_seconds: How often to check the state (in seconds)
+            interval_seconds: The interval in seconds between state checks
         """
-        self._ensure_session()
-        
-        logger.info(f"Starting state monitoring (interval: {interval_seconds}s)")
+        logger.info(f"Starting state monitoring with interval of {interval_seconds} seconds")
         
         try:
             while True:
                 try:
+                    # Check for state changes and execute handlers if needed
                     await self.handle_state_change()
                 except Exception as e:
-                    logger.error(f"Error in state monitoring: {e}")
-                    
+                    logger.error(f"Error in state monitoring cycle: {e}")
+                
+                # Wait for the specified interval before checking again
                 await asyncio.sleep(interval_seconds)
         except asyncio.CancelledError:
             logger.info("State monitoring cancelled")
-            raise  # Re-raise to propagate cancellation
+            raise
+        except Exception as e:
+            logger.error(f"Fatal error in state monitoring: {e}")
+            raise

@@ -79,10 +79,12 @@ metrics_cache = MetricsCache(cache_duration_seconds=30)
 
 # State toggle system
 state_lock = Lock()
+# Initialize with current time to ensure it has a valid timestamp from the start
+current_time = datetime.datetime.now().isoformat()
 current_state = {
     "value": "A",  # Current state value (A or B)
-    "timestamp": None,     # When the state was last changed
-    "last_toggle_time": None  # Track the last time the state was toggled
+    "timestamp": current_time,     # When the state was last changed
+    "last_toggle_time": current_time  # Track the last time the state was toggled
 }
 
 
@@ -522,6 +524,8 @@ def add_metrics():
 def check_state():
     """Check the current state"""
     with state_lock:
+        # Log the current state for debugging
+        logger.debug(f"Returning current state: {current_state}")
         # Return the current state
         return jsonify(current_state)
 

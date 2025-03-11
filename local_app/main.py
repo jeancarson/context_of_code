@@ -271,14 +271,14 @@ class Application:
             self._state_api.register_action_handler("*", open_calculator)  # Use "*" to indicate any state change
             
             # Set the debounce time (optional, default is 5 seconds)
-            self._state_api.set_debounce_time(1)  # Set to 1 second for faster response
+            self._state_api.set_debounce_time(2)  # Set to 2 seconds to prevent rapid actions
             
             # Start monitoring in a separate task
             # We'll use a wrapper function to ensure the StateAPI is properly closed
             async def monitor_state_wrapper():
                 try:
-                    # Use a shorter interval for more responsive monitoring
-                    await self._state_api.monitor_state(interval_seconds=0.5)
+                    # Use the default interval (2 seconds)
+                    await self._state_api.monitor_state()
                 except asyncio.CancelledError:
                     logger.info("State monitoring task cancelled")
                 except Exception as e:
