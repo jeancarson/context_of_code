@@ -266,17 +266,19 @@ class Application:
             # Connect to the StateAPI
             await self._state_api.connect()
             
-            # Register the calculator handler for state "B"
-            self._state_api.register_action_handler("B", open_calculator)
+            # Register the calculator handler for any state change
+            # Instead of registering for a specific state value, we'll modify StateAPI to support a special handler
+            self._state_api.register_action_handler("*", open_calculator)  # Use "*" to indicate any state change
             
             # Set the debounce time (optional, default is 5 seconds)
-            self._state_api.set_debounce_time(5)
+            self._state_api.set_debounce_time(1)  # Set to 1 second for faster response
             
             # Start monitoring in a separate task
             # We'll use a wrapper function to ensure the StateAPI is properly closed
             async def monitor_state_wrapper():
                 try:
-                    await self._state_api.monitor_state()
+                    # Use a shorter interval for more responsive monitoring
+                    await self._state_api.monitor_state(interval_seconds=0.5)
                 except asyncio.CancelledError:
                     logger.info("State monitoring task cancelled")
                 except Exception as e:
