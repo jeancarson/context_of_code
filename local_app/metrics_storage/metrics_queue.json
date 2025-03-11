@@ -1,0 +1,182 @@
+[
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:00.808969",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "CPUPercent",
+        "value": 1.9
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:00.825248",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "RAMPercent",
+        "value": 84.4
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:00.825248",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "DiskPercent",
+        "value": 63.8
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:06.834832",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "CPUPercent",
+        "value": 4.1
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:06.847927",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "RAMPercent",
+        "value": 82.3
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:06.847927",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "DiskPercent",
+        "value": 63.8
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:12.846303",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "CPUPercent",
+        "value": 1.2
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:12.860631",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "RAMPercent",
+        "value": 82.0
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:12.861622",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "DiskPercent",
+        "value": 63.8
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:18.869409",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "CPUPercent",
+        "value": 1.1
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:18.878846",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "RAMPercent",
+        "value": 82.0
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:18.878846",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "DiskPercent",
+        "value": 63.8
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:24.876236",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "CPUPercent",
+        "value": 6.5
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:24.885366",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "RAMPercent",
+        "value": 82.5
+      }
+    ]
+  },
+  {
+    "device_uuid": "eaa207a1-f1ca-4aaf-9b06-025a7bddf27d",
+    "aggregator_uuid": "1de592e2-9442-45da-ad94-8c682cea36b9",
+    "client_timestamp": "2025-03-11T01:09:24.885366",
+    "client_timezone_minutes": 0,
+    "metrics": [
+      {
+        "type": "DiskPercent",
+        "value": 63.8
+      }
+    ]
+  }
+]
