@@ -90,6 +90,11 @@ current_state = {
 
 # Define the Dash layout with routing
 dash_app.layout = html.Div([
+    # Include Font Awesome for icons (using a different approach)
+    html.Link(
+        rel="stylesheet",
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+    ),
     dcc.Location(id='url', refresh=False),
     html.Div(id='page-content')
 ])
@@ -544,7 +549,7 @@ def check_state():
 
 @server.route("/toggle-state", methods=["POST"])
 def toggle_state():
-    """Toggle the current state to trigger calculator opening"""
+    """Toggle the current state to trigger aggregator actions"""
     try:
         # Get the current time
         current_time = datetime.datetime.now()
@@ -559,15 +564,16 @@ def toggle_state():
                 # If it's been less than 2 seconds, don't allow the toggle
                 if time_since_last_toggle < 2.0:
                     return jsonify({
-                        "status": "ERROR",
+                        "status": "WAIT",
                         "message": f"Please wait {2.0 - time_since_last_toggle:.1f} seconds before toggling again",
-                        "state": current_state["value"]
+                        "state": current_state["value"],
+                        "wait_time": 2.0 - time_since_last_toggle
                     })
             
             # Get the old state for logging
             old_state = current_state["value"]
             
-            # Always set to state B to trigger calculator opening
+            # Always set to state B to trigger aggregator actions
             # The check_state endpoint will reset it to A after it's been checked
             new_state = "B"
             current_state["value"] = new_state
@@ -578,13 +584,13 @@ def toggle_state():
             current_state["last_toggle_time"] = current_time_iso
             
             # Log the state change
-            logger.info(f"State manually set to B to trigger calculator opening at {current_time_iso}")
+            logger.info(f"State manually set to B to trigger aggregator actions at {current_time_iso}")
         
         return jsonify({
             "status": "SUCCESS",
             "previous_state": old_state,
             "new_state": new_state,
-            "message": "Calculator opening request sent",
+            "message": "Aggregator action request sent",
             "timestamp": current_time_iso
         })
     except Exception as e:
@@ -1064,45 +1070,187 @@ def handle_refresh_click(n_clicks):
 )
 def handle_toggle_button(n_clicks):
     if n_clicks:
+        # Always disable the button immediately when clicked
+        # This prevents rapid clicking and provides immediate visual feedback
         try:
-            # Toggle the state to trigger calculator opening
-            toggle_response = requests.post(f"{config.api.base_url}/toggle-state")
+            # Toggle the state to trigger aggregator actions
+            # Use request.url_root to get the base URL of the current server
+            toggle_response = requests.post(f"{request.url_root}toggle-state")
             
             if toggle_response.status_code == 200:
                 response_data = toggle_response.json()
                 
+                # If we get a success response, show the success notification
                 if response_data.get("status") == "SUCCESS":
-                    # Create a notification about the calculator opening
+                    # Create a prettier notification about the aggregator actions
                     notification = html.Div([
-                        html.P("Calculator opening request sent!", className="mb-2"),
-                        html.P("The calculator application should open shortly on connected devices.", className="mb-2"),
-                        html.Button("Close", id="close-notification", className="btn btn-sm btn-secondary")
-                    ])
+                        html.Div([
+                            html.I(className="fas fa-cogs", style={
+                                "font-size": "24px",
+                                "margin-right": "10px",
+                                "color": "#4CAF50"
+                            }),
+                            html.Span("Action Request Sent", style={
+                                "font-weight": "bold",
+                                "font-size": "18px"
+                            })
+                        ], style={"display": "flex", "align-items": "center", "margin-bottom": "10px"}),
+                        html.P("The action request has been sent to connected aggregators.", 
+                               style={"margin-bottom": "15px", "color": "#555"}),
+                        html.Button([
+                            html.I(className="fas fa-times", style={"margin-right": "5px"}),
+                            "Close"
+                        ], id="close-notification", className="btn btn-sm btn-outline-secondary")
+                    ], style={"padding": "15px"})
                     
-                    # Return the notification, make it visible, and disable the button
-                    return notification, {'display': 'block'}, True
+                    # Return the notification with improved styling
+                    notification_style = {
+                        'display': 'block',
+                        'position': 'fixed',
+                        'top': '20px',
+                        'right': '20px',
+                        'padding': '0',
+                        'background-color': 'white',
+                        'color': '#333',
+                        'border-radius': '8px',
+                        'box-shadow': '0 4px 12px rgba(0,0,0,0.15)',
+                        'z-index': '1000',
+                        'min-width': '300px',
+                        'max-width': '400px',
+                        'border-left': '4px solid #4CAF50',
+                        'transition': 'opacity 0.3s ease-out, transform 0.3s ease-out'
+                    }
+                    
+                    return notification, notification_style, True
+                # If we get a WAIT response, just disable the button without showing any notification
+                elif response_data.get("status") == "WAIT":
+                    # Just disable the button without showing an error notification
+                    return dash.no_update, {'display': 'none'}, True
+                # For other errors, show an error notification but still disable the button
                 else:
-                    # Handle error in toggle request
+                    # Handle error in toggle request with prettier styling
                     error_message = response_data.get('message', 'Unknown error')
                     notification = html.Div([
-                        html.P(f"Error sending calculator request: {error_message}", className="mb-2 text-danger"),
-                        html.Button("Close", id="close-notification", className="btn btn-sm btn-secondary")
-                    ])
-                    return notification, {'display': 'block'}, False
+                        html.Div([
+                            html.I(className="fas fa-exclamation-triangle", style={
+                                "font-size": "24px",
+                                "margin-right": "10px",
+                                "color": "#f44336"
+                            }),
+                            html.Span("Error", style={
+                                "font-weight": "bold",
+                                "font-size": "18px"
+                            })
+                        ], style={"display": "flex", "align-items": "center", "margin-bottom": "10px"}),
+                        html.P(f"Error sending action request: {error_message}", 
+                               style={"margin-bottom": "15px", "color": "#555"}),
+                        html.Button([
+                            html.I(className="fas fa-times", style={"margin-right": "5px"}),
+                            "Close"
+                        ], id="close-notification", className="btn btn-sm btn-outline-secondary")
+                    ], style={"padding": "15px"})
+                    
+                    # Return the error notification with improved styling
+                    error_style = {
+                        'display': 'block',
+                        'position': 'fixed',
+                        'top': '20px',
+                        'right': '20px',
+                        'padding': '0',
+                        'background-color': 'white',
+                        'color': '#333',
+                        'border-radius': '8px',
+                        'box-shadow': '0 4px 12px rgba(0,0,0,0.15)',
+                        'z-index': '1000',
+                        'min-width': '300px',
+                        'max-width': '400px',
+                        'border-left': '4px solid #f44336',
+                        'transition': 'opacity 0.3s ease-out, transform 0.3s ease-out'
+                    }
+                    
+                    return notification, error_style, True
             else:
-                # Handle HTTP error
+                # Handle HTTP error with prettier styling
                 notification = html.Div([
-                    html.P(f"Error: HTTP {toggle_response.status_code}", className="mb-2 text-danger"),
-                    html.Button("Close", id="close-notification", className="btn btn-sm btn-secondary")
-                ])
-                return notification, {'display': 'block'}, False
+                    html.Div([
+                        html.I(className="fas fa-exclamation-circle", style={
+                            "font-size": "24px",
+                            "margin-right": "10px",
+                            "color": "#ff9800"
+                        }),
+                        html.Span("HTTP Error", style={
+                            "font-weight": "bold",
+                            "font-size": "18px"
+                        })
+                    ], style={"display": "flex", "align-items": "center", "margin-bottom": "10px"}),
+                    html.P(f"Error: HTTP {toggle_response.status_code}", 
+                           style={"margin-bottom": "15px", "color": "#555"}),
+                    html.Button([
+                        html.I(className="fas fa-times", style={"margin-right": "5px"}),
+                        "Close"
+                    ], id="close-notification", className="btn btn-sm btn-outline-secondary")
+                ], style={"padding": "15px"})
+                
+                # Return the HTTP error notification with improved styling
+                http_error_style = {
+                    'display': 'block',
+                    'position': 'fixed',
+                    'top': '20px',
+                    'right': '20px',
+                    'padding': '0',
+                    'background-color': 'white',
+                    'color': '#333',
+                    'border-radius': '8px',
+                    'box-shadow': '0 4px 12px rgba(0,0,0,0.15)',
+                    'z-index': '1000',
+                    'min-width': '300px',
+                    'max-width': '400px',
+                    'border-left': '4px solid #ff9800',
+                    'transition': 'opacity 0.3s ease-out, transform 0.3s ease-out'
+                }
+                
+                return notification, http_error_style, True
         except Exception as e:
-            # Handle any other exceptions
+            # Handle any other exceptions with prettier styling
             notification = html.Div([
-                html.P(f"Error: {str(e)}", className="mb-2 text-danger"),
-                html.Button("Close", id="close-notification", className="btn btn-sm btn-secondary")
-            ])
-            return notification, {'display': 'block'}, False
+                html.Div([
+                    html.I(className="fas fa-bug", style={
+                        "font-size": "24px",
+                        "margin-right": "10px",
+                        "color": "#9c27b0"
+                    }),
+                    html.Span("Exception", style={
+                        "font-weight": "bold",
+                        "font-size": "18px"
+                    })
+                ], style={"display": "flex", "align-items": "center", "margin-bottom": "10px"}),
+                html.P(f"Error: {str(e)}", 
+                       style={"margin-bottom": "15px", "color": "#555"}),
+                html.Button([
+                    html.I(className="fas fa-times", style={"margin-right": "5px"}),
+                    "Close"
+                ], id="close-notification", className="btn btn-sm btn-outline-secondary")
+            ], style={"padding": "15px"})
+            
+            # Return the exception notification with improved styling
+            exception_style = {
+                'display': 'block',
+                'position': 'fixed',
+                'top': '20px',
+                'right': '20px',
+                'padding': '0',
+                'background-color': 'white',
+                'color': '#333',
+                'border-radius': '8px',
+                'box-shadow': '0 4px 12px rgba(0,0,0,0.15)',
+                'z-index': '1000',
+                'min-width': '300px',
+                'max-width': '400px',
+                'border-left': '4px solid #9c27b0',
+                'transition': 'opacity 0.3s ease-out, transform 0.3s ease-out'
+            }
+            
+            return notification, exception_style, True
     
     # Default return if n_clicks is None
     return dash.no_update, dash.no_update, dash.no_update
@@ -1114,6 +1262,7 @@ def handle_toggle_button(n_clicks):
     prevent_initial_call=True
 )
 def close_notification(n_clicks):
+    """Close the notification when the close button is clicked"""
     if n_clicks:
         return {'display': 'none'}
     return dash.no_update
@@ -1125,8 +1274,9 @@ def close_notification(n_clicks):
     prevent_initial_call=True
 )
 def enable_button_after_delay(disabled):
+    """Re-enable the button after a 2-second delay"""
     if disabled:
-        # Use dcc.Interval to create a delay
+        # Use a fixed delay of 2 seconds to ensure the button is disabled long enough
         time.sleep(2)
         return False
     return dash.no_update

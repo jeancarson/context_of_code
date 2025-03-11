@@ -1,6 +1,6 @@
 {
     "api": {
-        "base_url": "http://jeancarson.pythonanywhere.com"
+        "base_url": "http://localhost:5000"
     },
     "intervals": {
         "local": 5,
