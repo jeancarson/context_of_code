@@ -36,7 +36,7 @@ from web_app.lib.services.orm_service import (
 )
 from threading import Lock
 import time
-from web_app.lib.ip_service import IPService
+from web_app.lib.services.ip_service import IPService
 import math
 import dash
 from dash import dcc, html, callback_context
