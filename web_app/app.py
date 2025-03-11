@@ -838,7 +838,7 @@ def update_visualizations(metric_type_id, start_date, end_date, min_value, max_v
                 table = html.Table(
                     [html.Tr([html.Th(col) for col in df_display.columns])] +
                     [html.Tr([html.Td(df_display.iloc[i][col]) for col in df_display.columns])
-                     for i in range(min(len(df_display), 10))]
+                     for i in range(len(df_display))]
                 )
                 
                 # Get the current time for the last update timestamp
